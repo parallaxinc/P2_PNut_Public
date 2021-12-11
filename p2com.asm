@@ -14586,6 +14586,7 @@ da_addr:	mov	[byte edi],'$'	;print '$'
 da_hex:		shl	cl,2		;get first nibble into position
 		ror	eax,cl
 		shr	cl,2
+		and ecx,255
 
 @@digit:	rol	eax,4		;print hex digits
 		push	eax
