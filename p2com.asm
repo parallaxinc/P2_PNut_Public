@@ -14583,7 +14583,9 @@ da_addr:	mov	[byte edi],'$'	;print '$'
 ; eax = value
 ; cl = digits
 ;
-da_hex:		shl	cl,2		;get first nibble into position
+da_hex:		movzx	ecx,cl		;clear upper ecx
+
+		shl	cl,2		;get first nibble into position
 		ror	eax,cl
 		shr	cl,2
 
