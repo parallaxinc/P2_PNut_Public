@@ -13,8 +13,8 @@ unit DebugDisplayUnit;
 interface
 
 uses
-  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, Math;
+  Windows, Messages, SysUtils, ExtCtrls, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, Math, SerialUnit;
 
 const
   ele_end               = 0;    // elements
@@ -35,7 +35,7 @@ const
   dis_midi              = 8;
 
   key_black             = 0;    // color group
-  key_white             = 1;
+  key_white             = 1;                                                         
   key_orange            = 2;
   key_blue              = 3;
   key_green             = 4;
@@ -90,39 +90,42 @@ const
   key_depth             = 50;
   key_dot               = 51;
   key_dotsize           = 52;
-  key_holdoff           = 53;
-  key_line              = 54;
-  key_linesize          = 55;
-  key_logscale          = 56;
-  key_lutcolors         = 57;
-  key_mag               = 58;
-  key_obox              = 59;
-  key_opacity           = 60;
-  key_origin            = 61;
-  key_oval              = 62;
-  key_polar             = 63;
-  key_pos               = 64;
-  key_precise           = 65;
-  key_range             = 66;
-  key_rate              = 67;
-  key_samples           = 68;
-  key_save              = 69;
-  key_scroll            = 70;
-  key_set               = 71;
-  key_signed            = 72;
-  key_size              = 73;
-  key_spacing           = 74;
-  key_sprite            = 75;
-  key_spritedef         = 76;
-  key_text              = 77;
-  key_textangle         = 78;
-  key_textsize          = 79;
-  key_textstyle         = 80;
-  key_title             = 81;
-  key_trace             = 82;
-  key_trigger           = 83;
-  key_update            = 84;
-  key_window            = 85;
+  key_hidexy            = 53;
+  key_holdoff           = 54;
+  key_line              = 55;
+  key_linesize          = 56;
+  key_logscale          = 57;
+  key_lutcolors         = 58;
+  key_mag               = 59;
+  key_obox              = 60;
+  key_opacity           = 61;
+  key_origin            = 62;
+  key_oval              = 63;
+  key_pc_key            = 64;
+  key_pc_mouse          = 65;
+  key_polar             = 66;
+  key_pos               = 67;
+  key_precise           = 68;
+  key_range             = 69;
+  key_rate              = 70;
+  key_samples           = 71;
+  key_save              = 72;
+  key_scroll            = 73;
+  key_set               = 74;
+  key_signed            = 75;
+  key_size              = 76;
+  key_spacing           = 77;
+  key_sprite            = 78;
+  key_spritedef         = 79;
+  key_text              = 80;
+  key_textangle         = 81;
+  key_textsize          = 82;
+  key_textstyle         = 83;
+  key_title             = 84;
+  key_trace             = 85;
+  key_trigger           = 86;
+  key_update            = 87;
+  key_window            = 88;
 
   TypeName              : array [dis_logic..dis_midi] of string = (
                           'LOGIC',
@@ -243,6 +246,9 @@ const
 type
   TDebugDisplayForm     = class(TForm)
 
+    MouseWheelTimer     : TTimer;
+    KeyTimer            : TTimer;
+
 private
 
   DisplayType           : integer;
@@ -318,6 +324,7 @@ private
   vLogScale             : boolean;
   vDirX                 : boolean;
   vDirY                 : boolean;
+  vHideXY               : boolean;
   vOffsetX              : integer;
   vOffsetY              : integer;
   vColorMode            : integer;
@@ -337,6 +344,8 @@ private
   vRow                  : integer;
   vIndex                : integer;
   vScale                : extended;
+  vMouseWheel           : integer;
+  vKeyPress             : byte;
   vPackAlt              : boolean;
   vPackSignx            : boolean;
   vPackMask             : integer;
@@ -400,11 +409,17 @@ private
 
 published
 
+  procedure WMGetDlgCode(var Msg: TWMGetDlgCode); message WM_GETDLGCODE;
+
   procedure FormCreate(Sender: TObject);
   procedure FormPaint(Sender: TObject);
   procedure FormMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
-  procedure FormMove(var Msg: TWMMove); message WM_WINDOWPOSCHANGED;
+  procedure FormMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: boolean);
+  procedure FormMouseWheelTimerTick(Sender: TObject);
+  procedure FormKeyPress(Sender: TObject; var Key: Char);
   procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+  procedure FormKeyTimerTick(Sender: TObject);
+  procedure FormMove(var Msg: TWMMove); message WM_WINDOWPOSCHANGED;
   procedure FormDestroy(Sender: TObject);
 
   procedure UpdateDisplay(Index: integer);
@@ -447,6 +462,7 @@ published
 
   procedure KeyTitle;
   function  KeyVal(var v: integer): boolean;
+  function  KeyBool(var v: boolean): boolean;
   function  KeyValWithin(var v: integer; bottom, top: integer): boolean;
   procedure KeyPos;
   procedure KeySize(var x, y: integer; wmin, wmax, hmin, hmax: integer);
@@ -481,6 +497,9 @@ published
   procedure AngleTextOut(x, y: integer; s: string; style, angle: integer);
   procedure BitmapToCanvas(Level: integer);
 
+  procedure SendMousePos;
+  procedure SendKeyPress;
+
   procedure SmoothShape(xc, yc, xs, ys, xro, yro, thick, color: integer; opacity: byte);
   procedure SmoothFillSetup(size, color: integer);
   procedure SmoothRect(x, y, xs, ys: integer; opacity: byte);
@@ -511,6 +530,7 @@ published
 public
 
   constructor Create(AOwner: TComponent); override;
+  destructor Destroy; override;
 
 end;
 
@@ -522,6 +542,12 @@ uses GlobalUnit, DebugUnit;
 //////////////////////
 //  Event Routines  //
 //////////////////////
+
+procedure TDebugDisplayForm.WMGetDlgCode(var Msg: TWMGetDlgCode);
+begin
+  inherited;
+  Msg.Result := Msg.Result or DLGC_WANTTAB;
+end;
 
 constructor TDebugDisplayForm.Create(AOwner: TComponent);
 begin
@@ -536,10 +562,25 @@ inherited CreateNew(AOwner);
   OldCreateOrder := False;
   OnCreate := FormCreate;
   OnMouseMove := FormMouseMove;
+  OnMouseWheel := FormMouseWheel;
   OnPaint := FormPaint;
+  OnKeyPress := FormKeyPress;
   OnKeyDown := FormKeyDown;
   OnDestroy := FormDestroy;
+  MouseWheelTimer := TTimer.Create(Self);
+  MouseWheelTimer.OnTimer := FormMouseWheelTimerTick;
+  MouseWheelTimer.Enabled := False;
+  KeyTimer := TTimer.Create(Self);
+  KeyTimer.OnTimer := FormKeyTimerTick;
+  KeyTimer.Enabled := False;
   PixelsPerInch := 96;
+end;
+
+destructor TDebugDisplayForm.Destroy;
+begin
+  MouseWheelTimer.Free;
+  KeyTimer.Free;
+inherited Destroy;
 end;
 
 procedure TDebugDisplayForm.FormCreate(Sender: TObject);
@@ -674,7 +715,11 @@ begin
       end;
     end;
     dis_plot:
-      Str := IntToStr(X div vDotSize) + ',' + IntToStr((ClientHeight - 1 - Y) div vDotSizeY);
+    begin
+      if vDirX then TextX := (ClientWidth - X) else TextX := X;
+      if vDirY then TextY := Y else TextY := (ClientHeight - Y);
+      Str := IntToStr(TextX div vDotSize) + ',' + IntToStr(TextY div vDotSizeY);
+    end;
     dis_term:
     begin
       if (X >= vMarginLeft) and (X < vMarginLeft + ChrWidth * vCols)
@@ -687,6 +732,7 @@ begin
       Str := IntToStr(X div vDotSize) + ',' + IntToStr(Y div vDotSizeY);
   end;
   // Get measurement cursor dimensions
+  if vHideXY then Str := '';
   StrW := CursorColor.Canvas.TextWidth(Str) + 1;    // + 1 prevents cursor rendering glitch
   StrH := CursorHeight - 16;                        // computed in FormCreate
   W := StrW + 16;
@@ -760,16 +806,59 @@ begin
   Perform(CM_CURSORCHANGED, 0, 0);
 end;
 
+procedure TDebugDisplayForm.FormMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: boolean);
+begin
+  if WheelDelta > 0 then vMouseWheel := 1 else vMouseWheel := -1;
+  MouseWheelTimer.Enabled := False;  // reset timer to cancel vMouseWheel in case it's not used in 100ms
+  MouseWheelTimer.Interval := 100;
+  MouseWheelTimer.Enabled := True;
+end;
+
+procedure TDebugDisplayForm.FormMouseWheelTimerTick(Sender: TObject);
+begin
+  MouseWheelTimer.Enabled := False;  // 100ms reached, disable timer and cancel vMouseWheel
+  vMouseWheel := 0;
+end;
+
+procedure TDebugDisplayForm.FormKeyPress(Sender: TObject; var Key: Char);
+begin
+  vKeyPress := Byte(Key);            // capture keys from OnKeyPress
+  KeyTimer.Enabled := False;         // reset timer to cancel vKeyPress in case it's not used in 100ms
+  KeyTimer.Interval := 100;
+  KeyTimer.Enabled := True;
+end;
+
+procedure TDebugDisplayForm.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+var
+  k: Char;
+begin
+  case Key of                        // capture keys missed by OnKeyPress
+    kLeft:     k := Chr(1);
+    kRight:    k := Chr(2);
+    kUp:       k := Chr(3);
+    kDown:     k := Chr(4);
+    kHome:     k := Chr(5);
+    kEnd:      k := Chr(6);
+    kDelete:   k := Chr(7);
+    kInsert:   k := Chr(10);
+    kPageUp:   k := Chr(11);
+    kPageDown: k := Chr(12);
+  else Exit;
+  end;
+  FormKeyPress(Self, k); Exit;
+end;
+
+procedure TDebugDisplayForm.FormKeyTimerTick(Sender: TObject);
+begin
+  KeyTimer.Enabled := False;         // 100ms reached, disable timer and cancel vKeyPress
+  vKeyPress := 0;
+end;
+
 procedure TDebugDisplayForm.FormMove(var Msg: TWMMove);
 begin
   inherited;
   Caption := CaptionStr + ' (' + IntToStr(Left) + ', ' + IntToStr(Top) + ')';
   CaptionPos := True;
-end;
-
-procedure TDebugDisplayForm.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
-begin
-  if Key = VK_ESCAPE then Close;
 end;
 
 procedure TDebugDisplayForm.FormDestroy(Sender: TObject);
@@ -848,6 +937,8 @@ begin
       key_color:
         if KeyColor(vBackColor)
           then KeyColor(vGridColor);
+      key_hidexy:
+        vHideXY := True;
       key_longs_1bit..key_bytes_4bit:
         KeyPack;
     end
@@ -921,6 +1012,10 @@ begin
       end;
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     while NextNum do
@@ -1021,6 +1116,8 @@ begin
     key_color:
       if KeyColor(vBackColor)
         then KeyColor(vGridColor);
+    key_hidexy:
+      vHideXY := True;
     key_longs_1bit..key_bytes_4bit:
       KeyPack;
   end;
@@ -1080,12 +1177,16 @@ begin
       begin
         vTriggered := False;    // don't draw trigger indicator
         ClearBitmap;
-        BitmapToCanvas(0);          // TESTT do BitmapToCanvas at end
+        BitmapToCanvas(0);      // TESTT do BitmapToCanvas at end
         SamplePop := 0;
         vRateCount := 0;
       end;
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     while NextNum do
@@ -1220,6 +1321,8 @@ begin
         KeyTwoPi;
       key_logscale:
         vLogScale := True;
+      key_hidexy:
+        vHideXY := True;
       key_longs_1bit..key_bytes_4bit:
         KeyPack;
     end
@@ -1257,6 +1360,10 @@ begin
       end;
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     while NextNum do
@@ -1386,6 +1493,8 @@ begin
         then KeyColor(vGridColor);
     key_logscale:
       vLogScale := True;
+    key_hidexy:
+      vHideXY := True;
     key_longs_1bit..key_bytes_4bit:
       KeyPack;
   end;
@@ -1439,6 +1548,10 @@ begin
       end;
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     while NextNum do
@@ -1555,6 +1668,8 @@ begin
       KeyColorMode;
     key_logscale:
       vLogScale := True;
+    key_hidexy:
+      vHideXY := True;
     key_longs_1bit..key_bytes_4bit:
       KeyPack;
   end;
@@ -1593,6 +1708,10 @@ begin
       end;
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     begin
@@ -1680,6 +1799,8 @@ begin
       KeyColor(vBackColor);
     key_update:                                       // UPDATE
       vUpdate := True;
+    key_hidexy:                                       // HIDEXY
+      vHideXY := True;
   end;
   // Clear sprite data
   FillChar(SpritePixels, SizeOf(SpritePixels), 0);
@@ -1878,10 +1999,8 @@ begin
     key_cartesian:                                    // CARTESIAN {flipy {flipx}}
     begin
       vPolar := False;
-      if not KeyVal(t1) then Continue;
-      vDirY := t1 <> 0;
-      if not KeyVal(t1) then Continue;
-      vDirX := t1 <> 0;
+      if not KeyBool(vDirY) then Continue;
+      KeyBool(vDirX);
     end;
     key_clear:                                        // CLEAR
       ClearBitmap;
@@ -1889,6 +2008,10 @@ begin
       BitmapToCanvas(0);
     key_save:                                         // SAVE
       KeySave;
+    key_pc_key:                                       // PC_KEY
+      SendKeyPress;
+    key_pc_mouse:                                     // PC_MOUSE
+      SendMousePos;
   end;
   if not vUpdate then BitmapToCanvas(0);
 end;
@@ -1938,6 +2061,8 @@ begin
       KeyColor(vBackColor);
     key_update:
       vUpdate := True;
+    key_hidexy:
+      vHideXY := True;
   end;
   // Set initial colors
   vTextColor := vColor[0];
@@ -1970,6 +2095,10 @@ begin
         BitmapToCanvas(0);
       key_save:         // save bitmap
         KeySave;
+      key_pc_key:       // get key
+        SendKeyPress;
+      key_pc_mouse:     // get mouse
+        SendMousePos;
     end
     else
     begin
@@ -2120,6 +2249,8 @@ begin
       KeyPack;
     key_update:
       vUpdate := True;
+    key_hidexy:
+      vHideXY := True;
   end;
   // Set form metrics
   SetSize(0, 0, 0, 0);
@@ -2164,6 +2295,10 @@ begin
         BitmapToCanvas(0);
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     while NextNum do
@@ -2295,6 +2430,10 @@ begin
         MIDI_Draw(True);
       key_save:
         KeySave;
+      key_pc_key:
+        SendKeyPress;
+      key_pc_mouse:
+        SendMousePos;
     end
     else
     while NextNum do
@@ -2388,6 +2527,12 @@ function TDebugDisplayForm.KeyVal(var v: integer): boolean;
 begin
   Result := True;
   if NextNum then v := val else Result := False;
+end;
+
+function TDebugDisplayForm.KeyBool(var v: boolean): boolean;
+begin
+  Result := True;
+  if NextNum then v := val <> 0 else Result := False;
 end;
 
 function TDebugDisplayForm.KeyValWithin(var v: integer; bottom, top: integer): boolean;
@@ -2571,6 +2716,7 @@ begin
   vTextAngle := 0;
   vLogScale := False;
   vUpdate := False;
+  vHideXY := False;
   vPixelX := 0;
   vPixelY := 0;
   vRate := 0;
@@ -2582,6 +2728,8 @@ begin
   vPolar := False;
   vTwoPi := $100000000;
   vTheta := 0;
+  vMouseWheel := 0;
+  vKeyPress := 0;
   for i := 0 to TopChannel do vLabel[i] := '';
   SetPack(0, False, False);
   SmoothFillSize := -1;
@@ -3216,6 +3364,53 @@ begin
     Canvas.StretchDraw(Rect(0, 0, vClientWidth, vClientHeight), Bitmap[1])
   else
     Canvas.Draw(0, 0, Bitmap[1]);
+end;
+
+
+/////////////////////////////////
+//  Mouse & Keyboard Feedback  //
+/////////////////////////////////
+
+procedure TDebugDisplayForm.SendMousePos;
+var
+  p: tPoint;
+  v: cardinal;
+begin
+  p := ScreenToClient(Mouse.CursorPos);
+  if (p.x < 0) or (p.x >= ClientWidth) or (p.y < 0) or (p.y >= ClientHeight) or
+      (DisplayType = dis_term) and
+      ((p.x < vMarginLeft) or (p.x >= ClientWidth - vMarginLeft) or
+      (p.y < vMarginTop) or (p.y >= ClientHeight - vMarginTop)) then
+    v := $03FFFFFF
+  else
+  begin
+    case DisplayType of
+      dis_plot:
+      begin
+        if vDirX then p.x := ClientWidth - p.x;
+        if not vDirY then p.y := ClientHeight - p.y;
+        p.x := p.x div vDotSize;
+        p.y := p.y div vDotSizeY;
+      end;
+      dis_term:
+      begin
+        p.x := (p.x - vMarginLeft) div ChrWidth;
+        p.y := (p.y - vMarginTop) div ChrHeight;
+      end;
+    end;
+    v := vMouseWheel and 3 shl 26 or p.y and $1FFF shl 13 or p.x and $1FFF;
+    if GetAsyncKeyState(VK_LBUTTON) and $8000 <> 0 then v := v or $10000000;
+    if GetAsyncKeyState(VK_MBUTTON) and $8000 <> 0 then v := v or $20000000;
+    if GetAsyncKeyState(VK_RBUTTON) and $8000 <> 0 then v := v or $40000000;
+  end;
+  TransmitDebugLong(v);
+  vMouseWheel := 0;   // vMouseWheel has been used, clear it
+end;
+
+procedure TDebugDisplayForm.SendKeyPress;
+begin
+  TransmitDebugLong(integer(vKeyPress));
+  vKeyPress := 0;     // vKeyPress has been used, clear it
 end;
 
 

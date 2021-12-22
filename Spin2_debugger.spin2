@@ -308,16 +308,14 @@ expb		call	#hexout
 ' Debug done
 '
 debug_done	testb	_com,#31  	 wc	'if tx output has occurred, output new line
-	if_c	callpa	#13,#txbyte
-	if_c	callpa	#10,#txbyte
+	if_c	callpb	#_lin,#rstrout
 
-.wait		rdpin	w,_txpin_ 	 wc	'wait for tx not busy
-	if_c	jmp	#.wait
+wait_done	rdpin	w,_txpin_ 	 wc	'wait for tx not busy
+	if_c	jmp	#wait_done
 
 		mov	regh+1,#$10		'set value to enable BRK-instruction interrupt
 
 breakpoint_done	fltl	_txpin_			'disable tx pin
-		fltl	_rxpin_			'disable rx pin
 
 		push	stk7			'restore stack
 		push	stk6
@@ -360,12 +358,10 @@ debug_byte	callpa	#z,#getdeb		'get DEBUG bytecode
 
 		test	z,#$E0		wz	'argument command?
 	if_nz	jmp	#arg_cmd
-'
-'
-' Simple command
-'
-		altgb	z,#.table
+
+		altgb	z,#.table		'simple command
 		getbyte	w
+		testb	z,#0		wc	'get lsb of command into c
 		jmp	w
 
 .table		byte	debug_done		'0 = end of DEBUG commands
@@ -376,12 +372,13 @@ debug_byte	callpa	#z,#getdeb		'get DEBUG bytecode
 		byte	.chr			'5 = output chr
 		byte	.str			'6 = output string
 		byte	.dly			'7 = DLY(ms)
-		byte	breakpoint		'8 = breakpoint
+		byte	.pc			'8 = PC_KEY(ptr)
+		byte	.pc			'9 = PC_MOUSE(ptr)
+		byte	breakpoint		'A = breakpoint
 
 .asm		ijnz	asm,#debug_byte		'set asm mode
 
 .if		call	#getval			'IF/IFNOT(cond)
-		testb	z,#0		wc
 	if_nc	tjz	x,#debug_done
 	if_c	tjnz	x,#debug_done
 		jmp	#debug_byte
@@ -399,6 +396,31 @@ debug_byte	callpa	#z,#getdeb		'get DEBUG bytecode
 .dly		call	#getval			'DLY(ms), get ms
 		mov	dlyms,x
 		jmp	#debug_done
+
+.pc	if_nc	callpb	#_key,#rstrout		'if PC_KEY(ptr), output "PC_KEY"+cr+lf
+	if_c	callpb	#_mou,#rstrout		'if PC_MOUSE(ptr), output "PC_MOUSE"+cr+lf
+		call	#getval			'get ptr into ptrb
+		mov	ptrb,x
+		call	#rxinit			'receive long into pb
+		call	#rxlong
+		fltl	_rxpin_
+		callpa	#12,#.long		'write mouse x (or key)
+	if_c	callpa	#12,#.long		'write mouse y
+	if_c	callpa	#1,#.long		'write mouse wheel delta
+	if_c	callpa	#0,#.long		'write mouse left button
+	if_c	callpa	#0,#.long		'write mouse middle button
+	if_c	callpa	#0,#.long		'write mouse right button
+		jmp	#wait_done
+
+.long		mov	y,pb			'pa=topbit, pb=value, ptrb=address
+		signx	y,pa
+		shr	pb,pa
+		shr	pb,#1
+		cmp	asm,#1		wz	'write to reg or hub?
+	if_z	mov	x,ptrb
+	if_z	add	ptrb,#1
+	if_z	jmp	#rwreg			'z=1 for write
+	_ret_	wrlong	y,ptrb++		'write to hub
 '
 '
 ' Breakpoint debugger
@@ -410,13 +432,10 @@ breakpoint	mov	w,#cogn			'send cogn..iret
 		incmod	w,#iret		wcz	'(z=0 for rwreg)
 	if_nc	jmp	#.initial
 
-		fltl	_rxpin_			'reset and configure the rx pin
-		wrpin	#%00_11111_0,_rxpin_
-		wxpin	_txmode_,_rxpin_
-		drvl	_rxpin_
+		call	#rxinit			'reset and configure the rx pin
 
 .command	call	#rxbyte			'command loop
-		test	pa,#0		wz
+		testb	pa,#0		wz	'z=command[0]
 		altgb	pa,#.table
 		getbyte	w
 		jmp	w
@@ -431,21 +450,21 @@ breakpoint	mov	w,#cogn			'send cogn..iret
 		byte	.brk			'7 = brk long, set brk and exit, $1FE.[31] = !brk.[4]
 
 .rwhub		call	#rxlong			'rdhub start,bytes / wrhub start,bytes,data
-		mov	ptra,x
+		mov	ptra,pb
 		call	#rxlong
 .rwhub2	if_nz	rdbyte	pa,ptra++
 	if_nz	call	#txbyte
 	if_z	call	#rxbyte
 	if_z	wrbyte	pa,ptra++
-		djnz	x,#.rwhub2
+		djnz	pb,#.rwhub2
 		jmp	#.command
 
 .rwcog		call	#rxlong			'rdcog start,longs / wrcog start,longs,data
-		mov	w,x
+		mov	w,pb
 		call	#rxlong
-		mov	z,x
+		mov	z,pb
 .rwcog2	if_z	call	#rxlong
-	if_z	mov	y,x
+	if_z	mov	y,pb
 		mov	x,w
 		call	#rwreg			'z=0 for read, z=1 for write
 	if_nz	mov	pa,x
@@ -455,18 +474,18 @@ breakpoint	mov	w,#cogn			'send cogn..iret
 		jmp	#.command
 
 .cfpin		call	#rxlong			'fltl/wrpin/wxpin/wypin/drvl/cogbrk
-		mov	y,x
+		mov	y,pb
 		testb	y,#31		wc	'fltl?
 	if_c	fltl	y
 		testb	y,#30		wc	'wrpin?
 	if_c	call	#rxlong
-	if_c	wrpin	x,y
+	if_c	wrpin	pb,y
 		testb	y,#29		wc	'wxpin?
 	if_c	call	#rxlong
-	if_c	wxpin	x,y
+	if_c	wxpin	pb,y
 		testb	y,#28		wc	'wypin?
 	if_c	call	#rxlong
-	if_c	wypin	x,y
+	if_c	wypin	pb,y
 		testb	y,#27		wc	'drvl?
 	if_c	drvl	y
 		testb	y,#26		wc	'cogbrk?
@@ -488,14 +507,77 @@ breakpoint	mov	w,#cogn			'send cogn..iret
 
 .stall		not	cth,#0			'flag stall
 		brk	#$000			'for debug_entry, show debug interrupt return address at $1FF
+		fltl	_rxpin_			'disable rx pin
 		jmp	#breakpoint_done	'do stall, then return to stall_done
 
 .brk		call	#rxlong			'brk long
-		testb	x,#4		wc	'1FE.[31] = BRK instruction not enabled (debugger mode)
+		testb	pb,#4		wc	'1FE.[31] = BRK instruction not enabled (debugger mode)
 		brk	#0
 		bitnc	$1FE,#31
-		mov	regh+1,x		'set BRK value
+		mov	regh+1,pb		'set BRK value
+		fltl	_rxpin_			'disable rx pin
 		jmp	#breakpoint_done
+'
+'
+' Transmit byte/long in pa
+'
+txlong		call	#.word			'output low word
+.word		call	#txbyte			'output high word
+
+txbyte		rdpin	w,_txpin_	 wc	'wait until tx not busy
+	if_c	jmp	#txbyte
+
+		wypin	pa,_txpin_		'output byte
+		shr	pa,#8			'shift in case long
+
+		bith	_com,#31		'set flag to indicate tx output has occurred
+
+		ret			wcz	'return with preserved flags
+'
+'
+' Reset and configure the rx pin
+'
+rxinit		fltl	_rxpin_
+		wrpin	#%00_11111_0,_rxpin_
+		wxpin	_txmode_,_rxpin_
+	_ret_	drvl	_rxpin_
+'
+'
+' Receive long into pb, preserves c/z
+'
+rxlong		call	#.word
+.word		call	#.byte
+.byte		shr	pb,#8
+		call	#rxbyte
+	_ret_	setbyte	pb,pa,#3
+'
+'
+' Receive byte into pa, preserves c/z
+'
+rxbyte		testp	_rxpin_		wc
+	if_nc	jmp	#rxbyte
+
+		rdpin	pa,_rxpin_
+		shr	pa,#32-8
+
+		ret			wcz
+'
+'
+' Output "CogN  " with possible timestamp
+'
+cognout		setnib	_cog,cogn,#6		'get cog number into string
+		callpb	#_cog,#rstrout		'output "CogN  "
+
+		mov	msb,#31			'enable 32-bit output
+
+	_ret_	tjs	_txpin_,#.time		'timestamp?
+
+.time		mov	x,cth			'output cth
+		call	#hexout
+		callpa	#"_",#txbyte		'output "_"
+		mov	x,ctl			'output ctl
+		call	#hexout_digits
+		mov	pb,#_cog+1		'output "  " (followed by rstrout)
 '
 '
 ' Register z-string output @pb
@@ -510,22 +592,6 @@ rstrout		shl	pb,#2			'convert register address to byte index
 .out		call	#txbyte			'output byte
 
 		ijnz	pb,#.loop		'next byte, always branches
-'
-'
-' Transmit byte/long in pa
-'
-txlong		call	#txword			'output low word
-txword		call	#txbyte			'output high word
-
-txbyte		rdpin	w,_txpin_	 wc	'wait until tx not busy
-	if_c	jmp	#txbyte
-
-		wypin	pa,_txpin_		'output byte
-		shr	pa,#8			'shift in case long
-
-		bith	_com,#31		'set flag to indicate tx output has occurred
-
-		ret			wcz	'return with preserved flags
 '
 '
 ' Argument command
@@ -637,14 +703,14 @@ getdeb		altd	pa
 	_ret_	add	ptr,#1
 '
 '
-' Get DEBUG value according to mode into x
+' Get DEBUG value according to mode into x, preserves c/z
 '
 getval		tjnz	asm,#getasm
 
 	_ret_	rdlong	x,++ptra
 '
 '
-' Get ASM value from DEBUG data into x
+' Get ASM value from DEBUG data into x, preserves c/z
 '
 ' %1000_00xx, %xxxx_xxxx					10-bit register, big-endian
 ' %00xx_xxxx, %xxxx_xxxx					14-bit constant, big-endian
@@ -662,11 +728,11 @@ getasm		rdword	x,ptr			'get initial word
 	if_c	sub	ptr,#1
 	if_c	rdlong	x,ptr
 	if_c	add	ptr,#4
-		ret
+		ret			wcz
 '
 '
-' z=0 : Read register x into x
-' z=1 : Write y to register x
+' z=0 : Read register x into x, preserves c/z
+' z=1 : Write y to register x, preserves c/z
 '
 ' $000..$00F = from @regl
 ' $010..$1F7 = from @regh
@@ -677,7 +743,7 @@ getasm		rdword	x,ptr			'get initial word
 rwreg		signx	x,#9		wc	'lut $200..$3FF? (signx simplifies comparisons)
   if_c_and_nz	rdlut	x,x
   if_c_and_z	wrlut	y,x
-  if_c		ret
+  if_c		ret			wcz
 
 		cmp	x,#$010		wc	'$000..$00F ?
   if_c		shl	x,#2
@@ -691,7 +757,7 @@ rwreg		signx	x,#9		wc	'lut $200..$3FF? (signx simplifies comparisons)
 .hub
   if_c_and_nz	rdlong	x,x			'reg $000..$1F7
   if_c_and_z	wrlong	y,x
-  if_c		ret
+  if_c		ret			wcz
 
 		cmp	x,#$1FA		wc	'$1FA..$1FF ?
   if_c		sub	x,#$1F8 - ptra_		'$1F8..$1F9 ?
@@ -699,7 +765,7 @@ rwreg		signx	x,#9		wc	'lut $200..$3FF? (signx simplifies comparisons)
   if_nz		mov	x,0-0			'reg $1F8..$1FF
   if_z		altd	x
   if_z		mov	0-0,y
-		ret
+		ret			wcz
 '
 '
 ' Decimal output x
@@ -773,44 +839,6 @@ dstrout		callpa	#pa,#getdeb
 	_ret_	tjnz	pa,#dstrout_loop
 '
 '
-' Output "CogN  " with possible timestamp
-'
-cognout		cogid	pb			'get cog number into string
-		setnib	_cog,pb,#6
-		callpb	#_cog,#rstrout		'output "CogN  "
-
-		mov	msb,#31			'enable 32-bit output
-
-	_ret_	tjs	_txpin_,#.time		'timestamp?
-
-.time		mov	x,cth			'output cth
-		call	#hexout
-		callpa	#"_",#txbyte		'output "_"
-		mov	x,ctl			'output ctl
-		call	#hexout_digits
-		mov	pb,#_cog+1		'output "  " (followed by rstrout)
-'
-'
-' Receive long into x
-'
-rxlong		call	#.word
-.word		call	#.byte
-.byte		shr	x,#8
-		call	#rxbyte
-	_ret_	setbyte	x,pa,#3
-'
-'
-' Receive byte into pa
-'
-rxbyte		testp	_rxpin_		wc
-	if_nc	jmp	#rxbyte
-
-		rdpin	pa,_rxpin_
-		shr	pa,#32-8
-
-		ret			wcz
-'
-'
 ' Defined data
 '
 asm		long	0			'0 = spin, 1 = asm
@@ -824,6 +852,9 @@ _com		byte	", ",0,0		'bit 31 of _com is used as a flag
 _equ		byte	" = ",0
 _nil		byte	"nil",0
 _nan		byte	"NaN",0
+_key		byte	"PC_KEY",13,10,0,0,0,0
+_mou		byte	"PC_MOUSE"
+_lin		byte	13,10,0,0
 '
 '
 ' Floating-point output x
@@ -963,7 +994,8 @@ debugger_end
 '	00000101	chr				output chr
 '	00000110	str				output string
 '	00000111	DLY(ms)				delay for ms
-'	00001000	debug				debug interrupt
+'	00001000	GETMOUSE(ptr)			get mouse position
+'	00001001	breakpoint			breakpoint
 '
 '	______00	', ' + zstr + ' = ' + data	specifiers for ZSTR..SBIN_LONG_ARRAY
 '	______01	       zstr + ' = ' + data

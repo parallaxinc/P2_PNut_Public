@@ -23,6 +23,7 @@ uses
   function         RGet: byte;
   procedure        RComm;
   procedure        ReceiveDebugData;
+  procedure        TransmitDebugLong(x: integer);
   procedure        CloseComm;
   procedure        CommError(Msg: string);
   function         CommString: string;
@@ -406,6 +407,15 @@ begin
   end
   else
     CommError('Unable to read from');
+end;
+
+procedure TransmitDebugLong(x: integer);
+begin
+  TByte(x and $FF);
+  TByte(x shr 8 and $FF);
+  TByte(x shr 16 and $FF);
+  TByte(x shr 24 and $FF);
+  TComm;
 end;
 
 // Comm error

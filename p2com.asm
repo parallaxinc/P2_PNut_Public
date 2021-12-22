@@ -10440,6 +10440,9 @@ ci_unary:	call	check_assign		;verify that assignment is allowed
 ; 00000101	chr				output chr
 ; 00000110	str				output string
 ; 00000111	DLY(ms)				delay for ms
+; 00001000	PC_KEY(ptr)			get key
+; 00001001	PC_MOUSE(ptr)			get mouse
+; 00001010	breakpoint			breakpoint
 ;
 ; ______00	', ' + zstr + ' = ' + data	specifiers for ZSTR..SBIN_LONG_ARRAY
 ; ______01	       zstr + ' = ' + data
@@ -10518,6 +10521,9 @@ count		dc_cogn
 count		dc_chr
 count		dc_str
 count		dc_dly
+count		dc_pc_key
+count		dc_pc_mouse
+count		dc_breakpoint
 ;
 ;
 ; Compile DEBUG for Spin2
@@ -10635,11 +10641,15 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		jne	@@notcmd
 
 @@tickcmd:	cmp	bl,dc_dly		;DLY command?
-		jne	@@notdly
-		call	@@singleparam		;compile single-parameter command
+		je	@@dkm
+		cmp	bl,dc_pc_key		;PC_KEY command?
+		je	@@dkm
+		cmp	bl,dc_pc_mouse		;PC_MOUSE command?
+		jne	@@notdkm
+@@dkm:		call	@@singleparam		;compile single-parameter command
 		call	get_right		;get ')' to ensure last command
 		jmp	@@enterdebug		;enter DEBUG code and record
-@@notdly:
+@@notdkm:
 		test	bl,10h			;dual-parameter command?
 		jnz	@@dualparam
 
@@ -15197,6 +15207,7 @@ count	dd_key_color			;COLOR
 count	dd_key_depth			;DEPTH
 count	dd_key_dot			;DOT
 count	dd_key_dotsize			;DOTSIZE
+count	dd_key_hidexy			;HIDEXY
 count	dd_key_holdoff			;HOLDOFF
 count	dd_key_line			;LINE
 count	dd_key_linesize			;LINESIZE
@@ -15207,6 +15218,8 @@ count	dd_key_obox			;OBOX
 count	dd_key_opacity			;OPACITY
 count	dd_key_origin			;ORIGIN
 count	dd_key_oval			;OVAL
+count	dd_key_pc_key			;PC_KEY
+count	dd_key_pc_mouse			;PC_MOUSE
 count	dd_key_polar			;POLAR
 count	dd_key_pos			;POS
 count	dd_key_precise			;PRECISE
@@ -15300,6 +15313,7 @@ debug_symbols:
 	sym	dd_key,	dd_key_depth,			'DEPTH'
 	sym	dd_key,	dd_key_dot,			'DOT'
 	sym	dd_key,	dd_key_dotsize,			'DOTSIZE'
+	sym	dd_key,	dd_key_hidexy,			'HIDEXY'
 	sym	dd_key,	dd_key_holdoff,			'HOLDOFF'
 	sym	dd_key,	dd_key_line,			'LINE'
 	sym	dd_key,	dd_key_linesize,		'LINESIZE'
@@ -15310,6 +15324,8 @@ debug_symbols:
 	sym	dd_key, dd_key_opacity,			'OPACITY'
 	sym	dd_key,	dd_key_origin,			'ORIGIN'
 	sym	dd_key,	dd_key_oval,			'OVAL'
+	sym	dd_key,	dd_key_pc_key,			'PC_KEY'
+	sym	dd_key,	dd_key_pc_mouse,		'PC_MOUSE'
 	sym	dd_key,	dd_key_polar,			'POLAR'
 	sym	dd_key,	dd_key_pos,			'POS'
 	sym	dd_key,	dd_key_precise,			'PRECISE'
@@ -16283,6 +16299,8 @@ automatic_symbols:
 	sym	type_debug,		0,		'DEBUG'		;debug
 
 	sym	type_debug_cmd,		dc_dly,		'DLY'		;debug commands
+	sym	type_debug_cmd,		dc_pc_key	'PC_KEY'
+	sym	type_debug_cmd,		dc_pc_mouse	'PC_MOUSE'
 
 	sym	type_debug_cmd,		00100100b,	'ZSTR'
 	sym	type_debug_cmd,		00100110b,	'ZSTR_'

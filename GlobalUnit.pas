@@ -7,6 +7,7 @@ uses
 
 const
   kBackSpace    = 8;
+  kInsert       = 45;
   kDelete       = 46;
   kLeft         = 37;
   kRight        = 39;
