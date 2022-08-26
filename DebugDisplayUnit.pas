@@ -257,7 +257,7 @@ private
   ChrWidth              : integer;
 
   Bitmap                : array [0..1] of TBitmap;
-  BitmapLine            : array [0..plot_hmax - 1] of Pointer;
+  BitmapLine            : array [0..SmoothFillMax - 1] of Pointer;
 
   DesktopDC             : HDC;
   DesktopBitmap         : TBitmap;
@@ -405,20 +405,20 @@ private
 
   SmoothFillSize        : integer;
   SmoothFillColor       : integer;
-  SmoothFillBuff        : array [0..DataSets * 3 - 1] of byte;
+  SmoothFillBuff        : array [0..SmoothFillMax * 3 - 1] of byte;
 
 published
 
   procedure WMGetDlgCode(var Msg: TWMGetDlgCode); message WM_GETDLGCODE;
 
   procedure FormCreate(Sender: TObject);
-  procedure FormPaint(Sender: TObject);
   procedure FormMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
   procedure FormMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: boolean);
   procedure FormMouseWheelTimerTick(Sender: TObject);
   procedure FormKeyPress(Sender: TObject; var Key: Char);
   procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
   procedure FormKeyTimerTick(Sender: TObject);
+  procedure FormPaint(Sender: TObject);
   procedure FormMove(var Msg: TWMMove); message WM_WINDOWPOSCHANGED;
   procedure FormDestroy(Sender: TObject);
 
@@ -543,15 +543,9 @@ uses GlobalUnit, DebugUnit;
 //  Event Routines  //
 //////////////////////
 
-procedure TDebugDisplayForm.WMGetDlgCode(var Msg: TWMGetDlgCode);
-begin
-  inherited;
-  Msg.Result := Msg.Result or DLGC_WANTTAB;
-end;
-
 constructor TDebugDisplayForm.Create(AOwner: TComponent);
 begin
-inherited CreateNew(AOwner);
+  inherited CreateNew(AOwner);
   BorderIcons := [biSystemMenu];
   BorderStyle := bsDialog;
   Font.Charset := DEFAULT_CHARSET;
@@ -559,13 +553,14 @@ inherited CreateNew(AOwner);
   Font.Height := -11;
   Font.Name := 'MS Sans Serif';
   Font.Style := [];
+  PixelsPerInch := 96;
   OldCreateOrder := False;
   OnCreate := FormCreate;
   OnMouseMove := FormMouseMove;
   OnMouseWheel := FormMouseWheel;
-  OnPaint := FormPaint;
   OnKeyPress := FormKeyPress;
   OnKeyDown := FormKeyDown;
+  OnPaint := FormPaint;
   OnDestroy := FormDestroy;
   MouseWheelTimer := TTimer.Create(Self);
   MouseWheelTimer.OnTimer := FormMouseWheelTimerTick;
@@ -573,14 +568,19 @@ inherited CreateNew(AOwner);
   KeyTimer := TTimer.Create(Self);
   KeyTimer.OnTimer := FormKeyTimerTick;
   KeyTimer.Enabled := False;
-  PixelsPerInch := 96;
 end;
 
 destructor TDebugDisplayForm.Destroy;
 begin
   MouseWheelTimer.Free;
   KeyTimer.Free;
-inherited Destroy;
+  inherited Destroy;
+end;
+
+procedure TDebugDisplayForm.WMGetDlgCode(var Msg: TWMGetDlgCode);
+begin
+  inherited;
+  Msg.Result := Msg.Result or DLGC_WANTTAB;
 end;
 
 procedure TDebugDisplayForm.FormCreate(Sender: TObject);
@@ -635,11 +635,6 @@ begin
     dis_midi            : MIDI_Configure;
   end;
   Show;
-end;
-
-procedure TDebugDisplayForm.FormPaint(Sender: TObject);
-begin
-  BitmapToCanvas(1);
 end;
 
 procedure TDebugDisplayForm.FormMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -852,6 +847,11 @@ procedure TDebugDisplayForm.FormKeyTimerTick(Sender: TObject);
 begin
   KeyTimer.Enabled := False;         // 100ms reached, disable timer and cancel vKeyPress
   vKeyPress := 0;
+end;
+
+procedure TDebugDisplayForm.FormPaint(Sender: TObject);
+begin
+  BitmapToCanvas(1);
 end;
 
 procedure TDebugDisplayForm.FormMove(var Msg: TWMMove);
@@ -2084,48 +2084,48 @@ begin
   begin
     if NextKey then
     case val of
-      key_clear:        // clear screen and home
+      key_clear:                // clear screen and home
       begin
         ClearBitmap;
         vUpdateFlag := True;
         vCol := 0;
         vRow := 0;
       end;
-      key_update:       // update bitmap
+      key_update:               // update bitmap
         BitmapToCanvas(0);
-      key_save:         // save bitmap
+      key_save:                 // save bitmap
         KeySave;
-      key_pc_key:       // get key
+      key_pc_key:               // get key
         SendKeyPress;
-      key_pc_mouse:     // get mouse
+      key_pc_mouse:             // get mouse
         SendMousePos;
     end
     else
     begin
       if NextNum then
       case val of
-        0:              // clear screen and home
+        0:                      // clear screen and home
         begin
           ClearBitmap;
           vUpdateFlag := True;
           vCol := 0;
           vRow := 0;
         end;
-        1:              // home
+        1:                      // home
         begin
           vCol := 0;
           vRow := 0;
         end;
-        2:              // set column
+        2:                      // set column
           KeyValWithin(vCol, 0, vCols - 1);
-        3:              // set row
+        3:                      // set row
           KeyValWithin(vRow, 0, vRows - 1);
-        4..7:           // set colors
+        4..7:                   // set colors
         begin
           vTextColor := vColor[(val - 4) * 2 + 0];
           vTextBackColor := vColor[(val - 4) * 2 + 1];
         end;
-        8:              // backspace
+        8:                      // backspace
           if (vCol <> 0) or (vRow <> 0) then
           begin
             Dec(vCol);
@@ -2135,24 +2135,24 @@ begin
               Dec(vRow);
             end;
           end;
-        9:              // tab
+        9:                      // tab
         begin
           TERM_Chr(' ');
           while vCol and 7 <> 0 do TERM_Chr(' ');
         end;
-        10:             // new line (10)
+        10:                     // new line (10)
           TERM_Chr(Chr(13));
-        13:             // new line (13), ignore trailing linefeed (10)
+        13:                     // new line (13), ignore trailing linefeed (10)
         begin
           TERM_Chr(Chr(13));
           if NextNum then if val <> 10 then Dec(ptr)
         end;
-        32..255:        // printable chr
+        32..255:                // printable chr
           TERM_Chr(Chr(val));
       end
       else
       if NextStr then
-      begin             // string
+      begin                     // string
         j := Length(PChar(val));
         if j <> 0 then for i := 0 to j - 1 do TERM_Chr(PChar(val)[i]);
       end;
@@ -3281,7 +3281,7 @@ end;
 procedure TDebugDisplayForm.PlotPixel(p: integer);
 var
   v: integer;
-  line: pByteArray;
+  line: PByteArray;
 begin
   p := TranslateColor(p, vColorMode);
   line := BitmapLine[vPixelY];
@@ -3374,18 +3374,23 @@ end;
 procedure TDebugDisplayForm.SendMousePos;
 var
   p: tPoint;
-  v: cardinal;
+  v, c: cardinal;
 begin
   p := ScreenToClient(Mouse.CursorPos);
   if (p.x < 0) or (p.x >= ClientWidth) or (p.y < 0) or (p.y >= ClientHeight) or
-      (DisplayType = dis_term) and
-      ((p.x < vMarginLeft) or (p.x >= ClientWidth - vMarginLeft) or
-      (p.y < vMarginTop) or (p.y >= ClientHeight - vMarginTop)) then
-    v := $03FFFFFF
+     (DisplayType = dis_term) and
+     ((p.x < vMarginLeft) or (p.x >= ClientWidth - vMarginLeft) or
+     (p.y < vMarginTop) or (p.y >= ClientHeight - vMarginTop)) then
+  begin
+    v := $03FFFFFF;
+    c := $FFFFFFFF;
+  end
   else
   begin
+    c := Canvas.Pixels[p.x, p.y];
+    c := c and $0000FF shl 16 or c and $00FF00 or c and $FF0000 shr 16; 
     case DisplayType of
-      dis_plot:
+      dis_spectro, dis_plot, dis_bitmap:
       begin
         if vDirX then p.x := ClientWidth - p.x;
         if not vDirY then p.y := ClientHeight - p.y;
@@ -3403,13 +3408,14 @@ begin
     if GetAsyncKeyState(VK_MBUTTON) and $8000 <> 0 then v := v or $20000000;
     if GetAsyncKeyState(VK_RBUTTON) and $8000 <> 0 then v := v or $40000000;
   end;
-  TransmitDebugLong(v);
+  TLong(v);
+  TLong(c);
   vMouseWheel := 0;   // vMouseWheel has been used, clear it
 end;
 
 procedure TDebugDisplayForm.SendKeyPress;
 begin
-  TransmitDebugLong(integer(vKeyPress));
+  TLong(integer(vKeyPress));
   vKeyPress := 0;     // vKeyPress has been used, clear it
 end;
 
@@ -3423,10 +3429,10 @@ var
   xf, yf, xri, yri, x, y, xl, xr, yb, yt: integer;
   rectangle, solid: boolean;
   yo_bias, yi_bias, xo_bias, xi_bias: extended;
-  xo_lut: array [0..DataSets shr 1 - 1] of integer;
-  yo_lut: array [0..DataSets shr 1 - 1] of integer;
-  xi_lut: array [0..DataSets shr 1 - 1] of integer;
-  yi_lut: array [0..DataSets shr 1 - 1] of integer;
+  xo_lut: array [0..SmoothFillMax shr 1 - 1] of integer;
+  yo_lut: array [0..SmoothFillMax shr 1 - 1] of integer;
+  xi_lut: array [0..SmoothFillMax shr 1 - 1] of integer;
+  yi_lut: array [0..SmoothFillMax shr 1 - 1] of integer;
   lft, rgt, top, bot: integer;
   xo, yo, xi, yi: integer;
   xo_above, xo_below, yo_above, yo_below: boolean;
@@ -3434,12 +3440,12 @@ var
   xopa, yopa, opa: byte;
 begin
   // ignore bad input
-  if (xc < -DataSets) or (xc > vWidth + DataSets) or
-     (yc < -DataSets) or (yc > vHeight + DataSets) or
-     (xs < 1) or (xs > DataSets) or
-     (ys < 1) or (ys > DataSets) or
-     (xro < 0) or (xro > DataSets shr 1) or
-     (yro < 0) or (yro > DataSets shr 1) or
+  if (xc < -SmoothFillMax) or (xc > vWidth + SmoothFillMax) or
+     (yc < -SmoothFillMax) or (yc > vHeight + SmoothFillMax) or
+     (xs < 1) or (xs > SmoothFillMax) or
+     (ys < 1) or (ys > SmoothFillMax) or
+     (xro < 0) or (xro > SmoothFillMax shr 1) or
+     (yro < 0) or (yro > SmoothFillMax shr 1) or
      (thick < 0) then Exit;
   // make fill buffer with color
   SmoothFillSetup(xs, color);

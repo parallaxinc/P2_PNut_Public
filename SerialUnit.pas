@@ -3,56 +3,79 @@ unit SerialUnit;
 interface
 
 uses
-  SysUtils, WinTypes, WinProcs, Classes, Forms, Messages, Dialogs, ExtCtrls, Graphics;
+  SysUtils, WinTypes, WinProcs, Classes, Forms, Messages, Dialogs,
+  ExtCtrls, Graphics, MMSystem_D10_2;
 
-  procedure        LoadHardware;
-  procedure        GetHardwareVersion;
-  procedure        FindHardware;
-  function         HardwareFound: boolean;
-  procedure        ResetHardware;
-  procedure        StartDebug;
-  procedure        OperateDebug;
-  procedure        OpenComm;
-  procedure        TString(s: string);
-  procedure        THex(x: byte);
-  procedure        TBase64(x: byte);
-  procedure        TByte(x: byte);
-  procedure        TComm;
-  function         RByte: byte;
-  function         RCheck: boolean;
-  function         RGet: byte;
-  procedure        RComm;
-  procedure        ReceiveDebugData;
-  procedure        TransmitDebugLong(x: integer);
-  procedure        CloseComm;
-  procedure        CommError(Msg: string);
-  function         CommString: string;
-  procedure        Waitms(ms: cardinal);
+type
+  TSerialThread = class(TThread)
+  protected
+    procedure Execute; override;
+  public
+    constructor Create; reintroduce;
+  end;
+
+  procedure LoadHardware;
+  procedure GetHardwareVersion;
+  procedure FindHardware;
+  function  HardwareFound: boolean;
+  procedure ResetHardware;
+
+  procedure StartDebug;
+  procedure OperateDebug;
+  procedure ReturnRByte;
+
+  procedure OpenComm;
+  procedure TString(s: string);
+  procedure THex(x: byte);
+  procedure TBase64(x: byte);
+  procedure TLong(x: integer);
+  procedure TByte(x: byte);
+  function  RLong: cardinal;
+  function  RWord: word;
+  function  RByte: byte;
+  procedure CloseComm;
+  procedure CommError(ErrorMsg: string);
+  function  CommString: string;
+
+  procedure BeginTimeBase;
+  procedure EndTimeBase;
+
+  procedure SerialThreadStart;
+  procedure SerialThreadStop;
+  procedure PumpTx;
+  procedure PumpRx;
 
 const
-  TxBuffSize         = $1000;
-  RxBuffSize         = $1000;
-  DebugBuffSize      = $1000000;
-  DebugBuffMask      = DebugBuffSize - 1;
+  DefaultBaud        = 2000000;
+  TxBuffSize         = $200000;         // 2 MB, must be power-of-2
+  TxBuffMask         = TxBuffSize - 1;
+  RxBuffSize         = $1000000;        // 16 MB, must be power-of-2
+  RxBuffMask         = RxBuffSize - 1;
 
 var
+  CommOpen           : boolean;
   CommPort           : integer;
   CommHandle         : THandle;
   CommDCB            : TDCB;
 
-  TxBuffLength       : cardinal;
-  TxBuff             : array[0..TxBuffSize-1] of byte;
-  RxBuffStart        : cardinal;
-  RxBuffEnd          : cardinal;
-  RxBuff             : array[0..RxBuffSize-1] of byte;
+  TxBuff             : array[0..TxBuffSize - 1] of byte;
+  TxHead             : integer;
+  TxTail             : integer;
 
-  DebugBuff          : array[0..DebugBuffSize-1] of byte;
-  DebugBuffHead      : integer;
-  DebugBuffTail      : integer;
+  RxBuff             : array[0..RxBuffSize - 1] of byte;
+  RxHead             : integer;
+  RxTail             : integer;
 
   Version            : byte;
   VersionMode        : boolean;
   AbortMode          : boolean;
+
+  TimeBase           : cardinal;
+
+  SerialThreadError  : boolean;
+  SerialThreadString : string;
+  SerialThreadActive : boolean;
+  SerialThread       : TSerialThread;
 
 implementation
 
@@ -105,9 +128,8 @@ begin
   end;
   if n > 0 then TBase64((m shl (6 - n)) and $3F);
   TString('~');
-  TComm;
   // debug mode?
-  if P2.DebugMode and (P2.DebugPinTx = 62) and (P2.DebugWindowsOff = 0) then
+  if P2.DebugMode and (P2.DebugWindowsOff = 0) and (P2.DebugBaud = p2.DownloadBaud) then
   begin
     ProgressForm.Hide;
     OperateDebug;
@@ -127,6 +149,7 @@ var
 begin
   VersionMode := True;
   FindHardware;
+  CloseComm;
   ProgressForm.Hide;
   s := 'Unknown.';
   if Version = Byte('A') then s := 'FPGA - 8 cogs, 512KB hub, 48 smart pins 63..56, 39..0, 80MHz';
@@ -136,7 +159,6 @@ begin
   if Version = Byte('E') then s := 'FPGA - 4 cogs, 512KB hub, 18 smart pins 63..62/15..0, 80MHz';
   if Version = Byte('F') then s := 'unsupported'; // 16 cogs, 1024KB hub, 7 smart pins 63..62/33..32/2..0, 80MHz';
   if Version = Byte('G') then s := 'P2X8C4M64P Rev B/C - 8 cogs, 512KB hub, 64 smart pins';
-  if CommOpen then CloseComm;
   MessageDlg(('Propeller2 found on ' + CommString + '.' + Chr(13) + Chr(13) + s), mtInformation, [mbOK], 0);
 end;
 
@@ -145,6 +167,7 @@ procedure FindHardware;
 var
   i, FirstPort: integer;
 begin
+  CloseComm;
   // show progress form
   ProgressForm.Caption := 'Hardware';
   ProgressForm.StatusLabel.Caption := '';
@@ -179,7 +202,6 @@ begin
     OpenComm;
     ResetHardware;
     TString('> Prop_Chk 0 0 0 0 ');
-    TComm;
     // receive version string
     s := '';
     for i := 1 to 14 do s := s + Chr(RByte);
@@ -206,19 +228,23 @@ end;
 // Reset hardware
 procedure ResetHardware;
 begin
-  // generate reset pulse via dtr and wait 10ms
-  Waitms(10);
+  // stop serial thread
+  SerialThreadStop;
+  // generate P2 reset pulse via DTR
+  Sleep(1);
   EscapeCommFunction(CommHandle, SETDTR);
-  Waitms(10);
+  Sleep(1);
   EscapeCommFunction(CommHandle, CLRDTR);
-  Waitms(10);
-  // flush any previously-received bytes and clear any break
-  PurgeComm(CommHandle, PURGE_RXCLEAR);
-  PurgeComm(CommHandle, PURGE_TXCLEAR);
-  repeat RComm until RxBuffEnd = 0;
-  Waitms(10);
-  repeat RComm until RxBuffEnd = 0;
+  // allow time for P2 ROM loader to start
+  Sleep(15);
+  // restart serial thread
+  SerialThreadStart;
 end;
+
+
+//////////////////////
+//  DEBUG Receiver  //
+//////////////////////
 
 // Start DEBUG
 procedure StartDebug;
@@ -232,39 +258,34 @@ end;
 procedure OperateDebug;
 var
   i: integer;
+  b: byte;
 begin
-  if P2.DebugBaud <> P2.DownloadBaud then
-  begin
-    Sleep(100);    // allow download to complete before changing baud
-    GetCommState(CommHandle, CommDCB);
-    CommDCB.BaudRate := P2.DebugBaud;
-    CommDCB.Flags := 0;
-    SetCommState(CommHandle, CommDCB);
-  end;
   DebugActive := True;
-  DebugBuffHead := 0;
-  DebugBuffTail := 0;
-  if RxBuffStart <> RxBuffEnd then
-  begin
-    Move(RxBuff[RxBuffStart], DebugBuff[0], RxBuffEnd - RxBuffStart);
-    DebugBuffHead := RxBuffEnd - RxBuffStart;
-  end;
   DebugForm.ResetDisplays;
   while DebugActive do
   begin
-    ReceiveDebugData;
     for i := 1 to 100 do
-      if DebugBuffHead <> DebugBuffTail then
+    begin
+      if SerialThreadError then CommError(SerialThreadString);
+      if RxHead <> RxTail then
       begin
-        DebugForm.ChrIn(DebugBuff[DebugBuffTail]);
-        DebugBuffTail := (DebugBuffTail + 1) and DebugBuffMask;
+        b := RxBuff[RxTail];
+        RxTail := (RxTail + 1) and RxBuffMask;
+        DebugForm.ChrIn(b);
       end
       else Break;
-    Application.ProcessMessages;
-    //Sleep(50);
+    end;
+    Application.ProcessMessages;        // process messages when no byte ready or after 100 consecutive bytes
   end;
   CloseComm;
 end;
+
+// Back up received byte
+procedure ReturnRByte;
+begin
+  RxTail := (RxTail - 1) and RxBuffMask;
+end;
+
 
 /////////////////////
 //  Comm Routines  //
@@ -280,6 +301,7 @@ const
     WriteTotalTimeoutMultiplier: 0;
     WriteTotalTimeoutConstant: 0);
 begin
+  CloseComm;
   CommOpen := False;
   CommHandle := CreateFile(PChar('\\.\' + CommString), GENERIC_READ or GENERIC_WRITE, 0, nil, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
   if CommHandle = INVALID_HANDLE_VALUE then CommError('Unable to open');
@@ -287,13 +309,11 @@ begin
   CommDCB.Flags := 0;
   SetCommState(CommHandle, CommDCB);
   SetCommTimeouts(CommHandle, CommTimeouts);
-  TxBuffLength := 0;
-  RxBuffStart := 0;
-  RxBuffEnd := 0;
+  SerialThreadStart;
   CommOpen := True;
 end;
 
-// Add string to comm buffer
+// Transmit string
 procedure TString(s: string);
 var
   i: integer;
@@ -302,139 +322,99 @@ begin
     TByte(Byte(s[i]));
 end;
 
-// Add hex byte to comm buffer
+// Transmit hex byte
 procedure THex(x: byte);
 const
-  HexChr: array [0..15] of byte = ($30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$41,$42,$43,$44,$45,$46);
+  HexChr: array [0..15] of Char = '0123456789ABCDEF';
 begin
-  TByte(HexChr[(x shr 4) and $F]);
-  TByte(HexChr[x and $F]);
+  TByte(Byte(HexChr[x shr 4 and $F]));
+  TByte(Byte(HexChr[x and $F]));
   TByte($20);
 end;
 
-// Add base64 byte to comm buffer
+// Transmit base64 character
 procedure TBase64(x: byte);
 const
-  Base64Chr: array [0..63] of byte =
-  ($41,$42,$43,$44,$45,$46,$47,$48,$49,$4A,$4B,$4C,$4D,$4E,$4F,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$5A,
-   $61,$62,$63,$64,$65,$66,$67,$68,$69,$6A,$6B,$6C,$6D,$6E,$6F,$70,$71,$72,$73,$74,$75,$76,$77,$78,$79,$7A,
-   $30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$2B,$2F);
+  Base64Chr: array [0..63] of Char = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 begin
-  TByte(Base64Chr[x]);
+  TByte(Byte(Base64Chr[x]));
 end;
 
-// Add byte to comm buffer
+// Transmit long
+procedure TLong(x: integer);
+var
+  i: integer;
+begin
+  for i := 0 to 3 do TByte(x shr (i shl 3));
+end;
+
+// Transmit byte
 procedure TByte(x: byte);
 begin
-  TxBuff[TxBuffLength] := x;
-  Inc(TxBuffLength);
-  if TxBuffLength = TxBuffSize then TComm;
+  TxBuff[TxHead] := x;
+  TxHead := (TxHead + 1) and TxBuffMask;
 end;
 
-// Transmit comm buffer
-procedure TComm;
+// Receive long
+function RLong: cardinal;
 var
-  BytesWritten: cardinal;
+  i: integer;
 begin
-  if not WriteFile(CommHandle, TxBuff, TxBuffLength, BytesWritten, nil) then
-    CommError('Unable to write to');
-  if BytesWritten <> TxBuffLength then
-    CommError('Transmit stall on');
-  TxBuffLength := 0;
+  for i := 0 to 3 do Result := Result shr 8 + RByte shl 24;
 end;
 
-// Receive comm byte
+// Receive word
+function RWord: word;
+var
+  i: integer;
+begin
+  for i := 0 to 1 do Result := Result shr 8 + RByte shl 8;
+end;
+
+// Receive byte
 function RByte: byte;
 var
   Ticks: cardinal;
 begin
   Ticks := GetTickCount;
-  while GetTickCount - Ticks < 100 do
-  begin
-    if RxBuffStart = RxBuffEnd then RComm;
-    if RxBuffStart <> RxBuffEnd then
+  repeat
+    if SerialThreadError then CommError(SerialThreadString);
+    if RxHead <> RxTail then
     begin
-      Result := RxBuff[RxBuffStart];
-      Inc(RxBuffStart);
+      Result := RxBuff[RxTail];
+      RxTail := (RxTail + 1) and RxBuffMask;
       Exit;
     end;
-  end;
+  until GetTickCount - Ticks > 200;
   CommError('Hardware lost on');
-end;
-
-// Check for received byte(s)
-function RCheck: boolean;
-begin
-  if RxBuffStart = RxBuffEnd then RComm;
-  Result := RxBuffStart <> RxBuffEnd
-end;
-
-// Get received byte
-function RGet : byte;
-begin
-  Result := RxBuff[RxBuffStart];
-  Inc(RxBuffStart);
-end;
-
-// Receive any data into comm buffer
-procedure RComm;
-begin
-  RxBuffStart := 0;
-  RxBuffEnd := 0;
-  if not ReadFile(CommHandle, RxBuff, RxBuffSize, RxBuffEnd, nil) then
-    CommError('Unable to read from');
-end;
-
-// Receive any DEBUG data into debug buffer
-procedure ReceiveDebugData;
-begin
-  RxBuffEnd := 0;
-  if ReadFile(CommHandle, RxBuff, RxBuffSize, RxBuffEnd, nil) then
-  begin
-    if RxBuffEnd > 0 then
-    begin
-      if DebugBuffHead + RxBuffEnd > DebugBuffSize then
-      begin
-        Move(RxBuff[0], DebugBuff[DebugBuffHead], DebugBuffSize - DebugBuffHead);
-        Move(RxBuff[DebugBuffSize - DebugBuffHead], DebugBuff[0], RxBuffEnd - (DebugBuffSize - DebugBuffHead));
-      end
-      else
-      begin
-        Move(RxBuff[0], DebugBuff[DebugBuffHead], RxBuffEnd);
-      end;
-      DebugBuffHead := (DebugBuffHead + RxBuffEnd) and DebugBuffMask;
-    end;
-  end
-  else
-    CommError('Unable to read from');
-end;
-
-procedure TransmitDebugLong(x: integer);
-begin
-  TByte(x and $FF);
-  TByte(x shr 8 and $FF);
-  TByte(x shr 16 and $FF);
-  TByte(x shr 24 and $FF);
-  TComm;
-end;
-
-// Comm error
-procedure CommError(Msg: string);
-begin
-  if CommOpen then CloseComm;
-  if AbortMode then
-  begin
-    ProgressForm.Hide;
-    if not BatchMode then MessageDlg(Msg + ' ' + CommString + '.', mtError, [mbOK], 0);
-  end;
-  Abort;
 end;
 
 // Close comm port
 procedure CloseComm;
 begin
-  CloseHandle(CommHandle);
-  CommOpen := False;
+  // close down debug in case active
+  DebugForm.CloseDisplays;
+  DebugForm.CloseLogFile;
+  DebugActive := False;
+  // if port open, close it
+  if CommOpen then
+  begin
+    SerialThreadStop;
+    CloseHandle(CommHandle);
+    CommOpen := False;
+  end;
+end;
+
+// Comm error
+procedure CommError(ErrorMsg: string);
+begin
+  CloseComm;
+  if AbortMode then
+  begin
+    ProgressForm.Hide;
+    if not BatchMode then MessageDlg(ErrorMsg + ' ' + CommString + '.', mtError, [mbOK], 0);
+  end;
+  Abort;
 end;
 
 // Return comm port string
@@ -443,13 +423,114 @@ begin
   Result := 'COM' + IntToStr(CommPort);
 end;
 
-// Wait milliseconds
-procedure Waitms(ms: cardinal);
+
+//////////////////////////////
+//  Time-Base Optimization  //
+//////////////////////////////
+
+// Start time base
+procedure BeginTimeBase;
 var
-  Ticks: cardinal;
+  TimeCaps: TTimeCaps;
 begin
-  Ticks := GetTickCount;
-  while GetTickCount - Ticks < ms do;
+  timeGetDevCaps(@TimeCaps, SizeOf(TimeCaps));
+  TimeBase := TimeCaps.wPeriodMin;
+  timeBeginPeriod(TimeBase);
+end;
+
+// End time base
+procedure EndTimeBase;
+begin
+  timeEndPeriod(TimeBase);
+end;
+
+
+/////////////////////
+//  Serial Thread  //
+/////////////////////
+
+procedure SerialThreadStart;
+var
+  x: cardinal;
+begin
+  // init variables
+  TxHead := 0;
+  TxTail := 0;
+  RxHead := 0;
+  RxTail := 0;
+  SerialThreadError := False;
+  SerialThreadString := '';
+  SerialThreadActive := True;
+  // read any residual Rx data to purge deep buffers
+  ReadFile(CommHandle, RxBuff, RxBuffSize, x, nil);
+  // start thread
+  SerialThread := TSerialThread.Create;
+end;
+
+procedure SerialThreadStop;
+begin
+  // allow Tx buffer to finish transmitting
+  if not SerialThreadError then repeat until TxHead = TxTail;
+  // deactivate thread
+  SerialThreadActive := False;
+  // wait for confirmation
+  repeat until SerialThreadString <> '';
+end;
+
+constructor TSerialThread.Create;
+begin
+  inherited Create(False);
+  FreeOnTerminate := True;
+  Priority := tpTimeCritical;
+end;
+
+procedure TSerialThread.Execute;
+begin
+  // keep pumping while active and no error
+  while SerialThreadActive and not SerialThreadError do
+  begin
+    // pump data
+    PumpTx;
+    PumpRx;
+    // yield time to the GUI thread
+    Sleep(0);
+  end;
+  // terminating, confirm string is not empty
+  if not SerialThreadError then
+    SerialThreadString := 'OK';
+end;
+
+procedure PumpTx;
+var
+  x: cardinal;
+begin
+  // Exit?
+  if (TxHead = TxTail) or SerialThreadError then Exit;
+  // Transmit any data
+  if TxHead < TxTail then x := TxBuffSize else x := TxHead;
+  if WriteFile(CommHandle, TxBuff[TxTail], x - TxTail, x, nil) then
+    TxTail := (TxTail + x) and TxBuffMask
+  else
+  begin
+    SerialThreadError := True;
+    SerialThreadString := 'Unable to write to';
+  end;
+end;
+
+procedure PumpRx;
+var
+  x: cardinal;
+begin
+  // Exit?
+  if SerialThreadError then Exit;
+  // Receive any data
+  if ReadFile(CommHandle, RxBuff[RxHead], RxBuffSize - RxHead, x, nil) then
+    RxHead := (RxHead + x) and RxBuffMask
+  else
+  begin
+    SerialThreadError := True;
+    SerialThreadString := 'Unable to read from';
+  end;
 end;
 
 end.

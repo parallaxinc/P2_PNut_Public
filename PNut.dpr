@@ -13,7 +13,8 @@ uses
   ComUnit in 'ComUnit.pas' {ComForm},
   DebugUnit in 'DebugUnit.pas' {DebugForm},
   InfoUnit in 'InfoUnit.pas' {InfoForm},
-  DebugDisplayUnit in 'DebugDisplayUnit.pas';
+  DebugDisplayUnit in 'DebugDisplayUnit.pas',
+  DebuggerUnit in 'DebuggerUnit.pas';
 
 {$R *.RES}
 

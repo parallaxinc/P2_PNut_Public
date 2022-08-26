@@ -4,7 +4,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, ExtCtrls, Printers,
-  Menus, Dialogs, ComCtrls, Math;
+  Menus, Dialogs, ComCtrls, Math, AppEvnts;
 
 const
   FormatPC = 0;
@@ -74,6 +74,7 @@ type
   procedure WMDropFiles(var Msg: TWMDropFiles); message WM_DROPFILES;
 
   procedure FormCreate(Sender: TObject);
+  procedure FormDestroy(Sender: TObject);
   procedure FormShow(Sender: TObject);
   procedure FormResize(Sender: TObject);
   procedure FormCloseQuery(Sender: TObject; var CanClose: boolean);
@@ -120,8 +121,6 @@ type
   procedure RunChangePort(Sender: TObject);
   procedure RunComposeRom(Sender: TObject);
   procedure HelpAbout(Sender: TObject);
-
-  procedure DebugTimerTick(Sender: TObject);
 
   function  GoLeft: boolean;
   function  GoRight: boolean;
@@ -192,7 +191,9 @@ type
   procedure ComposeRAM(ProgramFlash, DownloadToRAM: boolean);
   procedure ComposeROM;
   procedure LoadObj(Filename: string);
+
   function  NeedToStopDebugFirst: boolean;
+  procedure DebugTimerTick(Sender: TObject);
 end;
 
 var
@@ -318,10 +319,17 @@ begin
   UpdateEditor := True;
   ExtFileMode := False;
 
-  CommPort := 1;
   CommOpen := False;
+  CommPort := 1;
+
+  BeginTimeBase;
 
   Application.OnHint := ShowHint;
+end;
+
+procedure TEditorForm.FormDestroy(Sender: TObject);
+begin
+  EndTimeBase;
 end;
 
 procedure TEditorForm.FormShow(Sender: TObject);
@@ -2544,14 +2552,14 @@ end;
 
 function TEditorForm.NeedToStopDebugFirst: boolean;
 begin
-  if CommOpen then              // comm port open?
+  if CommOpen then                  // comm port open?
   begin
-    DebugActive := False;       // disable debug so that the port will close soon
-    DebugTimer.Interval := 10;  // set timer for 10ms
-    DebugTimer.Enabled := True; // enable timer to go off soon
-    Result := True;             // return true, download will be stalled
+    DebugActive := False;           // disable debug so that the port will close soon
+    DebugTimer.Interval := 10;      // set timer for 10ms
+    DebugTimer.Enabled := True;     // enable timer to go off soon
+    Result := True;                 // return true, download will be stalled
   end
-  else Result := False;         // comm port closed, download can proceed
+  else Result := False;             // comm port closed, download/debug can proceed
 end;
 
 procedure TEditorForm.DebugTimerTick(Sender: TObject);

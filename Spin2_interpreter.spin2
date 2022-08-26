@@ -1,5 +1,5 @@
 '************************************
-'*  Spin2 Interpreter - 2021.10.13  *
+'*  Spin2 Interpreter - 2022.08.12  *
 '************************************
 '
 CON	bc_setup_reg_1D8_1F8	= $B0
@@ -42,18 +42,19 @@ clkfreq_hub	long	320_000_000				'$44 - compiler supplies initial clkfreq value
 '
 		orgh
 
-stopcog		byte	bc_cogid, bc_cogstop	'cogstop(cogid)
+stopcog		byte	bc_cogid		& $FF	'cogstop(cogid)
+		byte	bc_cogstop		& $FF
 
-pri_sendb	byte	2*4			'2 parameters		PRI sendb(count,addr)
-		byte	bc_read_local_0_15+0	'read count		  repeat count
-.loop		byte	bc_setup_local_0_15+1	'setup addr		    send(byte[addr++])
-		byte	bc_var_postinc_push	'addr++
-		byte	bc_setup_byte_pa	'setup byte
-		byte	bc_read			'read
-		byte	bc_call_send		'call send
-		byte	bc_djnz			'djnz
-		byte	(.loop-$) & $7F		'loop address
-		byte	bc_return_results	'return
+pri_sendb	byte	2*4				'2 parameters		PRI sendb(count,addr)
+		byte	bc_read_local_0_15+0		'read count		  repeat count
+.loop		byte	bc_setup_local_0_15+1		'setup addr		    send(byte[addr++])
+		byte	bc_var_postinc_push	& $FF	'addr++
+		byte	bc_setup_byte_pa	& $FF	'setup byte
+		byte	bc_read			& $FF	'read
+		byte	bc_call_send		& $FF	'call send
+		byte	bc_djnz			& $FF	'djnz
+		byte	(.loop-$) & $7F			'loop address
+		byte	bc_return_results	& $FF	'return
 '
 '
 ' Hub bytecode vectors (up to $FE possible)
@@ -111,8 +112,8 @@ bc_fdiv		word	@fdiv_		'float /. float			(push)	$A6
 '*  Interpreter - cog registers  *
 '*********************************
 '
-		org	$124		'user area below
-cog_code				'start of cog code
+		org	$124		'start of reg code (user area below)
+reg_code
 '
 '
 ' Add pbase to x			(1 long)
@@ -360,7 +361,7 @@ wr_reg		mov	0,x
 '
 ' End of cog register code
 '
-cog_end
+reg_end
 '
 '
 ' Interpreter registers
@@ -373,7 +374,7 @@ mrecv		res	1
 msend		res	1
 w		res	1
 x		res	0
-ma		res	1		'(alias for float)
+ma		res	1		'(x alias for float)
 y		res	1
 z		res	1
 '
@@ -405,19 +406,19 @@ fm		res	1
 fx		res	1
 
 a		res	0		'a/b/c/d/e/f/g/h must remain in order
-na		res	1		'(alias for float)
+na		res	1		'(a alias for float)
 b		res	0
-sa		res	1		'(alias for float)
+sa		res	1		'(b alias for float)
 c		res	0
-xa		res	1		'(alias for float)
+xa		res	1		'(c alias for float)
 d		res	0
-mb		res	1		'(alias for float)
+mb		res	1		'(d alias for float)
 e		res	0
-nb		res	1		'(alias for float)
+nb		res	1		'(e alias for float)
 f		res	0
-sb		res	1		'(alias for float)
+sb		res	1		'(f alias for float)
 g		res	0
-xb		res	1		'(alias for float)
+xb		res	1		'(g alias for float)
 h		res	1
 
 		fit	$1F0		'buff occupies $1E0..$1EF, adjust user area size to fit
@@ -511,19 +512,19 @@ pop1	_ret_	popa	x		'| b c d e f g h
 '
 ' STRING()
 '
-string_		rfbyte	w	wz	'a b			b: STRING() - push string address and jump over string
-		brk	w		'a |
-		pusha	x		'| b
-		add	pb,#1		'| b
-		mov	x,pb		'| b			(continued in branch + hub_code)
+string_		rfbyte	w		'a b			b: STRING() - push string address and jump over string
+	_ret_	brk	w		'a |
+		pusha	x		'  b
+		add	pb,#1		'  b
+		mov	x,pb		'  b			(continued in branch + hub_code)
 '
 '
 ' Branches - jmp, jz, jnz, tjz, djnz
 '
-branch		rfvars	w		'| | c d e f g		c: jmp	- branch
-		test	x	wz	'| | | d e f |		d: jz	- test, pop, branch if z
-		popa	x		'| | | d e | |		e: jnz	- test, pop, branch if nz
-	if_nz	ret			'a | | d | f |		f: tjz	- test, if z then pop and branch
+branch		rfvars	w		'  | c d e f g		c: jmp	- branch
+		test	x	wz	'  | | d e f |		d: jz	- test, pop, branch if z
+		popa	x		'  | | d e | |		e: jnz	- test, pop, branch if nz
+	if_nz	ret			'  | | d | f |		f: tjz	- test, if z then pop and branch
 		sub	x,#1	wz	'  | | | | | g		g: djnz	- dec, if z then pop, else branch
 	if_z	popa	x		'  | | | | f g
 	if_z	ret			'  | | | e | g
@@ -617,12 +618,12 @@ bit_p		mov	fb,x		'| | c
 '
 ' Variable address/read/write		(11 longs)
 '
-var_rd		pusha	x		'a b   d		a: @var
-	_ret_	mov	x,ad		'a |   |		b: read  long[dbase][0..15]
-					'			c: write long[dbase][0..15]	(isolated)
-var_wr_im	getnib	ad,pa,#0	'  b c |		d: read var
-		shl	ad,#2		'  b c |		e: write var			(isolated)
-		add	ad,dbase	'  b c |		f: write var			(push)
+var_rd		pusha	x		'a b   d	a: @var
+	_ret_	mov	x,ad		'a |   |	b: read  long[dbase][0..15]
+					'		c: write long[dbase][0..15]	(isolated)
+var_wr_im	getnib	ad,pa,#0	'  b c |	d: read var
+		shl	ad,#2		'  b c |	e: write var			(isolated)
+		add	ad,dbase	'  b c |	f: write var			(push)
 
 		alti	rd		'  | | d
 	_ret_	rdlong	x,ad		'  b | d
@@ -901,7 +902,7 @@ bc_akpin		long  akpin_	|                    %00 << 10	'41	AKPIN(pins)
 bc_rdpin		long  rdpin_	|                   %010 << 10	'42	RDPIN(pin)	(push)
 bc_rqpin		long  rqpin_	|                    %00 << 10	'43	RQPIN(pin)	(push)
 
-bc_debug		long  debug_	|  %01111110001111111000 << 10	'44	DEBUG() rfvar,rfbyte
+bc_debug		long  debug_	|         %0001111111000 << 10	'44	DEBUG() rfvar,rfbyte
 
 bc_con_rfbyte		long  const	|                  %0110 << 10	'45	constant rfbyte
 bc_con_rfbyte_not	long  const	|         %0111111101110 << 10	'46	constant rfbyte!
@@ -1602,11 +1603,13 @@ clkset_		mov	z,x			'get clkfreq into z
 		setq	#2-1			'get clkmode into y
 		rdlong	x,--ptra		'get stack top into x
 
+clkset_init	rep	#99,#1			'use REP to stall interrupts until _ret_
+
 		rdlong	w,#@clkmode_hub		'get current clkmode to avoid (PPPP = %1111) clock glitch
 		andn	w,#%11			'switch to 20MHz while maintaining old pll/xtal settings
 		hubset	w
 
-clkset_init	test	y,#%10		wz	'if new pll/xtal settings then switch to 20MHz for 10ms
+		test	y,#%10		wz	'if new pll/xtal settings then switch to 20MHz for 10ms
 	if_nz	mov	w,y			'..while new pll/xtal settings take effect
 	if_nz	andn	w,#%11
 	if_nz	hubset	w
@@ -1701,16 +1704,27 @@ cogspin_	mov	v,x			'save stackadr
 '	ptra[-1] = return (w)	@COGSTOP(COGID)
 '	ptra[ 0] = params...
 '
-launch_spin	setq	#2-1			'get pbase/vbase
+launch_spin	loc	ptrb,#\$80000		'point to zeroes in empty hub space
+
+		setq	#ptra-1			'clear reg 0..ptra-1 (cancels mrecv/msend)
+		rdlong	0,ptrb
+
+		setq	#reg_end-reg_code-1	'load cog_code
+		rdlong	reg_code,#@reg_code
+
+		setq2	#(lut_code-1) & $1FF	'clear lut 0..lut_code-1
+		rdlong	0,ptrb
+
+		setq2	#lut_end-lut_code-1	'load lut_code
+		rdlong	lut_code & $1FF,rdf
+
+		setq	#2-1			'get pbase/vbase
 		rdlong	pbase,ptra
 
 		or	pbase,#%10		'set pbase 'trap' flag
 
 		mov	dbase,ptra		'set dbase to @params
 		add	dbase,#6*4
-
-		mov	mrecv,#0		'set mrecv to cancelled state
-		mov	msend,#0		'set msend to cancelled state
 
 		mov	w,dbase			'set dcall value to be loaded
 
@@ -1719,13 +1733,7 @@ launch_spin	setq	#2-1			'get pbase/vbase
 
 		andn	pbase,#%11		'restore pbase address
 
-		setq	#cog_end-cog_code-1	'load cog code (overwrites dcall register)
-		rdlong	cog_code,#@cog_code
-
-		setq2	#lut_end-lut_code-1	'load lut code
-		rdlong	lut_code & $1FF,rdf
-
-		mov	dcall,dbase		'set dcall (must be after loading cog code)
+		mov	dcall,dbase		'set dcall
 
 		mov	pb,#@stopcog		'set return to COGSTOP(COGID) bytecodes
 
@@ -2105,6 +2113,8 @@ frel_		popa	w			'pop left-side float
 '
 fsqrt_		call	#unpackf		'unpack float
 
+		tjz	ma,#fabs_		'if mantissa zero, got result, use _ret_ in FABS
+
 		or	na,sa			'if negative, result = NaN
 
 		sar	xa,#1		wc	'halve root exponent
@@ -2237,8 +2247,14 @@ packf		testbn	na,#0		wc	'if NaN, result $FFFFFFFF
 	if_nc	ret				'if NaN or mantissa=0 (result 0), done
 
 		ror	ma,y			'msb-justify mantissa without leading 1
-		add	ma,#$00000100	wc	'round up mantissa by 1/2 lsb
-		addx	xa,y			'adjust exponent, accounting for overflow
+		bitl	ma,#0			'clear leading 1 now in lsb
+
+		mov	mb,ma			'check if mantissa is even with 0.500 fraction
+		zerox	mb,#9		wc	'clear msb's, c=0 for addx in case no rounding
+		cmp	mb,#%0100000000	wz	'even with 0.500 fraction?
+	if_nz	add	ma,#%0100000000	wc	'if not, round up mantissa by 0.500
+
+		addx	xa,y			'adjust exponent and account for rounding overflow
 		add	xa,#127-29		'bias exponent
 
 		fges	xa,##-23		'limit exponent to -23..255

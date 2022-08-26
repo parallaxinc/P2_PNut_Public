@@ -1,15 +1,16 @@
 object DebugForm: TDebugForm
-  Left = 736
-  Top = 652
+  Left = 14
+  Top = 1641
   Anchors = []
   AutoScroll = False
+  BorderIcons = [biSystemMenu, biMaximize]
   Caption = 'DEBUG Output'
-  ClientHeight = 228
-  ClientWidth = 438
+  ClientHeight = 281
+  ClientWidth = 539
   Color = clBlack
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
-  Font.Height = -11
+  Font.Height = -14
   Font.Name = 'MS Sans Serif'
   Font.Style = []
   OldCreateOrder = False
@@ -18,6 +19,6 @@ object DebugForm: TDebugForm
   OnCreate = FormCreate
   OnKeyDown = FormKeyDown
   OnResize = FormResize
-  PixelsPerInch = 96
-  TextHeight = 13
+  PixelsPerInch = 120
+  TextHeight = 16
 end

@@ -96,11 +96,11 @@ begin
   MapImage.Canvas.Brush.Color := clBlack;
   MapImage.Canvas.Rectangle(debx,0, MapImage.Width+1, MapImage.Height+1);
 
-  InterpreterLabel.Caption := Format('%6.0n', [StrToFloat(IntToStr(P2.SizeInterpreter))]) + ' bytes';
-  ProgramLabel.Caption := Format('%6.0n', [StrToFloat(IntToStr(P2.SizeObj))]) + ' bytes';
-  VariableLabel.Caption := Format('%6.0n', [StrToFloat(IntToStr(P2.SizeVar))]) + ' bytes';
-  StackLabel.Caption := Format('%6.0n', [StrToFloat(IntToStr(stksize))]) + ' bytes';
-  DebuggerLabel.Caption := Format('%6.0n', [StrToFloat(IntToStr(debugsize))]) + ' bytes';
+  InterpreterLabel.Caption := Format('%6.0n', [P2.SizeInterpreter * 1.0]) + ' bytes';
+  ProgramLabel.Caption := Format('%6.0n', [P2.SizeObj * 1.0]) + ' bytes';
+  VariableLabel.Caption := Format('%6.0n', [P2.SizeVar * 1.0]) + ' bytes';
+  StackLabel.Caption := Format('%6.0n', [stksize * 1.0]) + ' bytes';
+  DebuggerLabel.Caption := Format('%6.0n', [debugsize * 1.0]) + ' bytes';
 
   case P2.ClkMode and $C shr 2 of
     0: osc := 'XI <off>';
@@ -124,7 +124,7 @@ begin
   end
   else
   begin
-    FreqLabel.Caption := Format('%10.0n', [StrToFloat(IntToStr(P2.ClkFreq))]) + ' Hz';
+    FreqLabel.Caption := Format('%10.0n', [P2.ClkFreq * 1.0]) + ' Hz';
     if P2.ClkMode and 3 = 2 then
     begin
       ClockLabel.Caption := osc;
@@ -133,7 +133,7 @@ begin
     else
     begin
       ClockLabel.Caption := osc + ' + PLL';
-      InputFreqLabel.Caption := Format('%10.0n', [StrToFloat(IntToStr(P2.XinFreq))]) + ' Hz';
+      InputFreqLabel.Caption := Format('%10.0n', [P2.XinFreq * 1.0]) + ' Hz';
     end;
   end;
 end;

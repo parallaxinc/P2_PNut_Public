@@ -37,10 +37,7 @@ const
 
   ObjStackLimit         = 16;
 
-  DefaultBaud           = 2000000;
-
 type
-  PP2 = ^TP2;
   TP2 = packed record
     Error:		boolean;
     ErrorMsg:           PChar;
@@ -160,9 +157,10 @@ end;
   function  Within(Value, Minimum, Maximum: integer): integer;
   function  IsWordChr(C: Char): boolean;
   function  Smaller(x, y: Integer): integer;
+  function  Greater(x, y: Integer): integer;
 
 var
-  P2: PP2;
+  P2: ^TP2;
 
   SourceBuffer       : array[0..SourceLimit] of byte; // +1 allows 0 end byte
   ListBuffer         : array[0..ListLimit] of byte; // +1 allows end reading
@@ -176,8 +174,10 @@ var
 
   BatchMode          : boolean;
   DebugActive        : boolean;
-  CommOpen           : boolean;
 
+  DebuggerID         : integer;
+  LastDebugTick      : integer;
+  RequestCOGBRK      : integer;
 
 implementation
 
@@ -220,5 +220,10 @@ begin
   if x < y then Result := x else Result := y;
 end;
   
+function Greater(x, y: Integer): integer;
+begin
+  if x > y then Result := x else Result := y;
+end;
+
 end.
 

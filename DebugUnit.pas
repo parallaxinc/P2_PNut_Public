@@ -3,8 +3,8 @@ unit DebugUnit;
 interface
 
 uses
-  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms, Dialogs, DebugDisplayUnit,
-  ComCtrls;
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms, Dialogs, ComCtrls,
+  SerialUnit, DebugDisplayUnit, DebuggerUnit;
 
 type
   TDebugForm = class(TForm)
@@ -30,8 +30,10 @@ var
   LogFileOpen           : boolean;
   LogFileSize           : integer;
 
-  DisplayForm           : array[0..31] of TDebugDisplayForm;
+  DebuggerForm          : array[0..7] of TDebuggerForm;
+  DebuggerEna           : integer;      // 8 bitwise enables
 
+  DisplayForm           : array[0..31] of TDebugDisplayForm;
   DisplayStrFlag        : boolean;
   DisplayStrLen         : integer;
 
@@ -57,11 +59,20 @@ uses GlobalUnit;
 //////////////////////
 
 procedure TDebugForm.FormCreate(Sender: TObject);
+var i: integer;
 begin
+  // Hide the 'minimize' button
+  i := GetWindowLongA(Self.Handle, GWL_STYLE);
+  i := SetWindowLongA(Self.Handle, GWL_STYLE, i and not WS_MINIMIZEBOX);
+  // Set initial size
   Left   := Screen.Width div 4;
   Top    := Screen.Height * 3 div 4;
   Width  := Screen.Width div 2;
   Height := Screen.Height * 3 div 16;
+  // Disable debugger
+  DebuggerEna := 0;
+  LastDebugTick := 0;
+  RequestCOGBRK := 0;
 end;
 
 procedure TDebugForm.FormResize(Sender: TObject);
@@ -110,12 +121,16 @@ begin
   Show;
 end;
 
-// Close any open display windows
+// Close any open display/debugger windows
 procedure TDebugForm.CloseDisplays;
 var i: integer;
 begin
+  // Close any open displays
   for i := 0 to 31 do if P2.DebugDisplayEna shr i and 1 = 1 then DisplayForm[i].Free;
   P2.DebugDisplayEna := 0;
+  // Close any open debuggers
+  for i := 0 to 7 do if DebuggerEna shr i and 1 = 1 then DebuggerForm[i].Free;
+  DebuggerEna := 0;
 end;
 
 // Resize display
@@ -163,11 +178,27 @@ procedure TDebugForm.ChrIn(x: byte);
 var
   i, j: integer;
 begin
+  // start of debugger message?
+  if (x < 8) then
+  begin
+    ReturnRByte;
+    if DebuggerEna shr x and 1 = 0 then
+    begin
+      DebuggerID := x;
+      DebuggerForm[x] := TDebuggerForm.Create(Application);
+      DebuggerEna := DebuggerEna or 1 shl x;
+    end;
+    LastDebugTick := GetTickCount;
+    DebuggerForm[x].Breakpoint;
+    Exit;
+  end;
+  // start of display string?
   if (x = $60) and not DisplayStrFlag then
   begin
+    DisplayStrLen := 0;
     DisplayStrFlag := True;
-    DisplayStrLen := 0
   end
+  // body of display string?
   else if DisplayStrFlag then
   begin
     if DisplayStrLen < DebugStringLimit then
@@ -186,7 +217,7 @@ begin
         if P2.DebugDisplayType[0] = 1 then
         begin
           DisplayForm[P2.DebugDisplayNew] := TDebugDisplayForm.Create(Application);
-          SetFocus;     // return focus to this form
+          SetFocus;             // return focus to this form
         end
         else
         // update existing debug display(s)?
