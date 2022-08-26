@@ -385,7 +385,7 @@ begin
       RxTail := (RxTail + 1) and RxBuffMask;
       Exit;
     end;
-  until GetTickCount - Ticks > 200;
+  until GetTickCount - Ticks > 300;
   CommError('Hardware lost on');
 end;
 

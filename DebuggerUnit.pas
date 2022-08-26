@@ -1888,6 +1888,8 @@ begin
   BreakpointTimer.Enabled := False;
   BreakpointTimer.Interval := 250;
   BreakpointTimer.Enabled := True;
+  // Process messages to keep things flowing
+  Application.ProcessMessages;
 end;
 
 
