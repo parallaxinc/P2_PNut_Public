@@ -8,8 +8,8 @@
 ;*		  Version 0.1			*
 ;*						*
 ;*	     Written by Chip Gracey		*
-;*	 (C) 2006-2021 by Parallax, Inc.	*
-;*	    Last Updated: 10/23/2021		*
+;*	 (C) 2006-2022 by Parallax, Inc.	*
+;*	    Last Updated: 02/25/2022		*
 ;*						*
 ;************************************************
 ;
@@ -72,7 +72,7 @@ msend_reg		=	1D3h
 pasm_regs		=	1D8h
 inline_locals		=	1E0h
 
-debug_size_limit	=	2B00h
+debug_size_limit	=	2A00h
 
 clkfreq_address		=	044h
 ;
@@ -663,6 +663,7 @@ count		type_trunc		;	TRUNC
 count		type_constr		;	STRING
 count		type_block		;	CON, VAR, DAT, OBJ, PUB, PRI
 count		type_size		;	BYTE, WORD, LONG
+count		type_size_fit		;	BYTEFIT, WORDFIT
 count		type_fvar		;	FVAR, FVARS
 count		type_precompile		;	PRECOMPILE
 count		type_archive		;	ARCHIVE
@@ -1798,6 +1799,9 @@ error_bdmbifc:	call	set_error
 ;error_bie:	call	set_error
 ;TESTT		db	'Block is empty',0
 
+error_bmbft:	call	set_error
+		db	'BYTEFIT values must range from -$80 to $FF',0
+
 error_bnso:	call	set_error
 		db	'Blocknest stack overflow',0
 
@@ -1844,7 +1848,7 @@ error_dbz:	call	set_error
 		db	'Divide by zero',0
 
 error_dcbpbac:	call	set_error
-		db	'DEBUG cannot be preceded by a condition or _RET_',0
+		db	'DEBUG cannot be preceded by a condition, except _RET_',0
 
 error_dditl:	call	set_error
 		db	'DEBUG data is too long',0
@@ -1918,8 +1922,8 @@ error_eaocom:	call	set_error
 error_eassign:	call	set_error
 		db	'Expected ":="',0
 
-error_eavmoo:	call	set_error
-		db	'Expected a variable, method, or object',0
+error_easvmoo:	call	set_error
+		db	'Expected a string, variable, method, or object',0
 
 error_eatq:	call	set_error
 		db	'Expected a terminating quote',0
@@ -2319,6 +2323,9 @@ error_us:	call	set_error
 
 error_vnao:	call	set_error
 		db	'Variable needs an operator',0
+
+error_wmbft:	call	set_error
+		db	'WORDFIT values must range from -$8000 to $FFFF',0
 ;
 ;
 ; Set error pointer and abort assembly
@@ -3741,6 +3748,7 @@ compile_inline_section:				;inline mode
 		mov	[inline_flag],1
 		call	write_symbols_inline	;start inline symbols
 
+
 compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		mov	[@@objptr],eax
 
@@ -3766,28 +3774,28 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		cmp	[inline_flag],1		;block or inline mode?
 		jne	@@passblock
 
-		mov	[orgh],0				;inline mode, start in org mode
-		push	[inline_cog_org]			;reset cog org
+		mov	[orgh],0		;inline mode, start in org mode
+		push	[inline_cog_org]	;reset cog org
 		pop	[cog_org]
-		push	[inline_cog_org_limit]			;reset cog org limit
+		push	[inline_cog_org_limit]	;reset cog org limit
 		pop	[cog_org_limit]
-		mov	eax,[@@sourceptr]			;reset source_ptr
+		mov	eax,[@@sourceptr]	;reset source_ptr
 		mov	[source_ptr],eax
 		jmp	@@passprep
 
-@@passblock:	mov	[orgh],1				;block mode, start in orgh mode
-		mov	[cog_org],000h shl 2			;reset cog org
-		mov	[cog_org_limit],1F8h shl 2		;reset cog org limit
-		cmp	[pasm_mode],1				;set hub org according to pasm_mode
-		mov	eax,[obj_ptr]				;use obj_ptr for pasm_mode
+@@passblock:	mov	[orgh],1			;block mode, start in orgh mode
+		mov	[cog_org],000h shl 2		;reset cog org
+		mov	[cog_org_limit],1F8h shl 2	;reset cog org limit
+		cmp	[pasm_mode],1			;set hub org according to pasm_mode
+		mov	eax,[obj_ptr]			;use obj_ptr for pasm_mode
 		je	@@passpasm
-		mov	eax,00400h				;use $00400 for spin_mode
+		mov	eax,00400h			;use $00400 for spin_mode
 @@passpasm:	mov	[hub_org],eax
-		sub	eax,[obj_ptr]				;set orgh_offset
+		sub	eax,[obj_ptr]			;set orgh_offset
 		mov	[orgh_offset],eax
-		mov	[hub_org_limit],100000h			;reset hub org limit
-		call	reset_element				;reset element
-@@nextblock:	mov	dl,block_dat				;scan for dat block
+		mov	[hub_org_limit],100000h		;reset hub org limit
+		call	reset_element			;reset element
+@@nextblock:	mov	dl,block_dat			;scan for dat block
 		call	next_block
 
 @@passprep:	push	[source_start]		;prepare dat block info
@@ -3801,6 +3809,8 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		mov	[@@infoflag],1		;not eof, set info flag
 		cmp	al,type_end
 		je	@@nextline
+
+		mov	[@@sizefit],0		;clear size fit flag
 
 		xor	edx,edx			;reset symbol flag
 		push	[source_start]		;save info start in case symbol
@@ -3833,6 +3843,8 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 @@continue:
 		cmp	al,type_size		;check for size
 		je	@@data
+		cmp	al,type_size_fit	;check for size fit
+		je	@@datachk
 		cmp	al,type_asm_dir		;check for assembly directive
 		je	@@dir
 		cmp	al,type_asm_cond	;check for assembly condition
@@ -3873,6 +3885,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 @@done:		ret
 
 
+@@datachk:	mov	[@@sizefit],1		;set size fit flag
 
 @@data:		mov	[@@size],bl		;byte/word/long data, set size
 		call	@@entersymbol		;enter any symbol
@@ -4700,21 +4713,28 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		ret
 
 
-@@op_debug:	mov	eax,ecx			;DEBUG, condition is not allowed
+@@op_debug:	mov	eax,ecx			;DEBUG, _ret_ is okay, but condition is not allowed
 		shr	eax,32-4
+		jz	@@debugretok
 		cmp	al,0Fh
 		jne	error_dcbpbac
-
-		call	get_left		;get '('
-
-		cmp	[debug_mode],0		;if debug disabled, ignore parameters and emit nothing
+@@debugretok:
+		cmp	[debug_mode],0		;if debug disabled, ignore rest of line and emit nothing
 		jnz	@@debugon
 		call	scan_to_end		;scan to end of line
 		call	get_end			;get end
 		pop	eax			;pop return address so no long is emitted
 		jmp	@@nextline		;get next line
 @@debugon:
-		cmp	[@@pass],0		;if pass 0, skip parameters and emit long
+		call	check_left		;check for '('
+		je	@@debugleft
+
+		and	ecx,0FFFFFFFFh		;no parameters, assemble 'BRK #0' for debugger
+		or	ecx,00D640036h
+		call	get_end			;make sure eol
+		jmp	back_element
+
+@@debugleft:	cmp	[@@pass],0		;parameters, if pass 0, skip parameters and emit long
 		jne	@@debugpass1
 		jmp	scan_to_end		;scan to end of line
 @@debugpass1:
@@ -4808,6 +4828,26 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		mov	dl,2
 
 @@enter:	jecxz	@@ret			;enter ebx value ecx times, using dl size
+
+		cmp	[@@sizefit],0		;size fit enabled?
+		je	@@enter2
+
+		cmp	dl,1			;check size range
+		ja	@@enter2		;long?
+		jne	@@enterb		;byte?
+
+		cmp	ebx,0FFFF8000h		;word
+		jl	@@enterwerr
+		cmp	ebx,0FFFFh
+		jle	@@enter2
+@@enterwerr:	jmp	error_wmbft
+
+@@enterb:	cmp	ebx,0FFFFFF80h		;byte
+		jl	@@enterberr
+		cmp	ebx,0FFh
+		jle	@@enter2
+@@enterberr:	jmp	error_bmbft
+
 @@enter2:	push	ecx
 		mov	cl,dl
 		mov	dh,1
@@ -5336,6 +5376,7 @@ ddx		@@sourceptr
 ddx		@@objptr
 ddx		@@local
 dbx		@@size
+dbx		@@sizefit
 dbx		@@pass
 
 dbx		@@effectbits
@@ -5812,6 +5853,16 @@ insert_debugger:
 		jne	error_debugcog
 		mov	[obj+@@_hubset_],bl
 @@nosymcogs:
+		lea	esi,[@@symcoginit]		;check for 'debug_coginit' symbol
+		call	@@checksymbol
+		jc	@@nosymcoginit
+		mov	[dword obj+@@_brkcond_],110h
+@@nosymcoginit:
+		lea	esi,[@@symmain]			;check for 'debug_main' symbol
+		call	@@checksymbol
+		jc	@@nosymmain
+		mov	[dword obj+@@_brkcond_],001h
+@@nosymmain:
 		lea	esi,[@@symdelay]		;check for 'debug_delay' symbol
 		call	@@checksymbol
 		jc	@@nosymdelay
@@ -5910,6 +5961,8 @@ insert_debugger:
 
 
 @@symcogs:	db	'DEBUG_COGS',0
+@@symcoginit:	db	'DEBUG_COGINIT',0
+@@symmain:	db	'DEBUG_MAIN',0
 @@symdelay:	db	'DEBUG_DELAY',0
 @@sympin:	db	'DEBUG_PIN',0			;same purpose as debug_pin_tx
 @@sympintx:	db	'DEBUG_PIN_TX',0
@@ -5926,15 +5979,16 @@ insert_debugger:
 @@symlog:	db	'DEBUG_LOG_SIZE',0
 @@symoff:	db	'DEBUG_WINDOWS_OFF',0
 
-@@_clkmode1_	=	0A0h
-@@_clkmode2_	=	0A4h
-@@_delay_	=	0A8h
-@@_appsize_	=	0ACh
-@@_hubset_	=	0B0h
-@@_txpin_	=	100h
-@@_rxpin_	=	104h
-@@_txmode_	=	108h
-@@_waitxms_	=	10Ch
+@@_clkmode1_	=	0C4h
+@@_clkmode2_	=	0C8h
+@@_delay_	=	0CCh
+@@_appsize_	=	0D0h
+@@_hubset_	=	0D4h
+@@_brkcond_	=	108h
+@@_txpin_	=	12Ch
+@@_rxpin_	=	130h
+@@_txmode_	=	134h
+@@_waitxms_	=	138h
 
 debugger:	include "Spin2_debugger.inc"
 debugger_end:
@@ -7751,6 +7805,22 @@ resolve_exp:	mov	dl,ternary_precedence+1	;expression, set ternary precedence + 1
 ;
 check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		jne	@@notspin2
+
+		call	sub_to_neg		;-constant?
+		jne	@@spin2notneg
+		call	get_element
+		cmp	al,type_con		;-type_con?
+		jne	@@spin2notconi
+		neg	ebx
+		jmp	@@spin2con
+@@spin2notconi:	cmp	al,type_con_float	;-type_con_float?
+		jne	@@spin2notconf
+		xor	ebx,80000000h
+		jmp	@@spin2con
+@@spin2notconf:	call	back_element		;back up past non-constant		
+		call	back_element		;back up to '-'
+		call	get_element		;get '-' again
+@@spin2notneg:
 		cmp	al,type_con		;type_con okay
 		je	@@spin2exit
 		cmp	al,type_con_float	;type_con_float okay
@@ -7779,14 +7849,29 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 @@spin2exit:	ret
 @@notspin2:
 
+		call	sub_to_neg		;-constant?
+		jne	@@notneg
+		call	get_element
+		cmp	al,type_con		;-type_con?
+		jne	@@notconi
+		neg	ebx
+		jmp	@@chkconi
+@@notconi:	cmp	al,type_con_float	;-type_con_float?
+		jne	@@notconf
+		xor	ebx,80000000h
+		jmp	@@chkconf
+@@notconf:	call	back_element		;back up past non-constant		
+		call	back_element		;back up to '-'
+		call	get_element		;get '-' again
+@@notneg:
 		cmp	al,type_con		;constant integer?
 		jne	@@notcon
-		call	@@checkint
+@@chkconi:	call	@@checkint
 		jmp	@@okay
 @@notcon:
 		cmp	al,type_con_float	;constant float?
 		jne	@@notconfloat
-		call	@@checkfloat
+@@chkconf:	call	@@checkfloat
 		jmp	@@okay
 @@notconfloat:
 		cmp	al,type_float		;FLOAT(integer exp)?
@@ -8130,8 +8215,9 @@ perform_unary:	xor	eax,eax			;if undefined flag, return 0
 
 ddx		@@t
 
-@@fsqrt:	test	eax,80000000h		;fsqrt
-		jnz	error_fpcmbp
+@@fsqrt:	cmp	eax,80000000h		;fsqrt
+		ja	error_fpcmbp
+		and	eax,7FFFFFFFh		;accommodate -0.0 ($80000000)
 		call	fp_sqrt
 		jc	error_fpo
 		ret
@@ -8909,7 +8995,9 @@ fp_sqrt:	push	ecx
 		shr	eax,1
 @@odd:		add	esi,127-1		;bias and decrement exponent to account for bit29-justification
 
-		mov	[@@sqr],eax		;sqrt
+		or	eax,eax			;sqrt
+		jz	@@zero
+		mov	[@@sqr],eax
 		mov	ebx,80000000h
 		xor	ecx,ecx
 @@sqrt2:	or	ecx,ebx
@@ -8921,7 +9009,7 @@ fp_sqrt:	push	ecx
 @@sqrt3:	shr	ebx,1
 		jnc	@@sqrt2
 		mov	eax,ecx
-
+@@zero:
 		xor	edx,edx			;clear sign in dl.0
 		call	fp_pack_eax		;pack float, c=1 if overflow
 
@@ -9082,9 +9170,14 @@ fp_pack_eax:	or	eax,eax			;if mantissa 0, result 0, c=0
 		shl	eax,1
 		jnc	@@exp
 
-		add	eax,100h		;round to nearest mantissa lsb
-		adc	esi,0
-
+		push	eax			;check for even mantissa and 0.500 fraction
+		and	eax,3FFh
+		cmp	eax,100h
+		pop	eax
+		jz	@@skip			;if even and 0.500, skip rounding
+		add	eax,100h		;round up by 0.500
+		adc	esi,0			;account for overflow
+@@skip:
 		cmp	esi,0			;if exponent > 0, pack result
 		jg	@@pack
 
@@ -10442,20 +10535,19 @@ ci_unary:	call	check_assign		;verify that assignment is allowed
 ; 00000111	DLY(ms)				delay for ms
 ; 00001000	PC_KEY(ptr)			get key
 ; 00001001	PC_MOUSE(ptr)			get mouse
-; 00001010	breakpoint			breakpoint
 ;
 ; ______00	', ' + zstr + ' = ' + data	specifiers for ZSTR..SBIN_LONG_ARRAY
 ; ______01	       zstr + ' = ' + data
 ; ______10	               ', ' + data
 ; ______11	                      data
 ;
-; 001000__	<unused>
+; 001000__	<empty>
 ; 001001__	ZSTR(ptr)			z-string, in quotes for show
-; 001010__	<unused>
+; 001010__	<empty>
 ; 001011__	FDEC(val)			floating-point
 ; 001100__	FDEC_REG_ARRAY(ptr,len)		floating-point
 ; 001101__	LSTR(ptr,len)			length-string, in quotes for show
-; 001110__	<unused>
+; 001110__	<empty>
 ; 001111__	FDEC_ARRAY(ptr,len)		floating-point
 ;
 ; 010000__	UDEC(val)			unsigned decimal
@@ -10523,7 +10615,6 @@ count		dc_str
 count		dc_dly
 count		dc_pc_key
 count		dc_pc_mouse
-count		dc_breakpoint
 ;
 ;
 ; Compile DEBUG for Spin2
@@ -10533,12 +10624,22 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		mov	[@@tickmode],0		;reset tick mode
 		mov	[@@stack],0		;reset run-time stack depth
 
-		call	get_left		;get '('
-
 		cmp	[debug_mode],0		;if debug disabled, scan to end of line
 		je	scan_to_end
 
-		call	check_right		;if ')' then empty
+		call	check_left		;debug enabled, check for '('
+		je	@@left
+
+		call	get_end			;no '(', make sure end of line
+		call	back_element
+		mov	al,bc_debug		;enter DEBUG bytecode
+		call	enter_obj
+		mov	al,0			;enter rfvar value for stack popping
+		call	enter_obj
+		mov	al,0			;enter BRK code for debugger
+		jmp	enter_obj
+
+@@left:		call	check_right		;'(', if ')' then empty
 		je	@@enterdebug
 
 		mov	eax,[source_ptr]	;check for '`'
@@ -10876,11 +10977,15 @@ ci_debug_asm:	mov	[debug_first],1		;set first flag
 		jne	@@notcmd
 
 @@tickcmd:	cmp	bl,dc_dly		;DLY command?
-		jne	@@notdly
-		call	@@singleparam		;compile single-parameter command
+		je	@@dkm
+		cmp	bl,dc_pc_key		;PC_KEY command?
+		je	@@dkm
+		cmp	bl,dc_pc_mouse		;PC_MOUSE command?
+		jne	@@notdkm
+@@dkm:		call	@@singleparam		;compile single-parameter command
 		call	get_right		;get ')' to ensure last command
 		jmp	@@enterdebug		;enter DEBUG code and record
-@@notdly:
+@@notdkm:
 		call	get_left		;ZSTR..SBIN_LONG_ARRAY, get '('
 
 @@param:	call	debug_enter_byte_flag	;enter command with flag
@@ -11322,7 +11427,7 @@ compile_exp:	push	eax
 		je	@@term
 		call	negcon_to_con		;convert -constant to constant
 		call	sub_to_neg		;convert subtract to negate
-		call	fsub_to_fneg		;convert floating-point subtract to negate
+		call	fsub_to_fneg		;convert floating-point subtract to floating-point negate
 		cmp	al,type_atat
 		je	@@atat
 		call	check_unary
@@ -11431,7 +11536,7 @@ compile_term:	cmp	al,type_con		;constant integer?
 		jne	error_etmrasr
 		jmp	compile_flex
 @@notflex:
-		cmp	al,type_at		;@obj{[]}.method, @method, @var ?
+		cmp	al,type_at		;@"string", @obj{[]}.method, @method, @var ?
 		je	ct_at
 
 		cmp	al,type_inc		;++var ?
@@ -11948,16 +12053,52 @@ compile_flex:	call	get_left		;get '('
 		jmp	enter_obj
 ;
 ;
-; Compile term - @obj{[]}.method, @method or @var
+; Compile term - @"string", @obj{[]}.method, @method or @var
 ;
-ct_at:		call	get_element		;get object, method, or variable
+ct_at:		call	get_element		;get string, object, method, or variable
+		cmp	al,type_con
+		je	@@string
 		cmp	al,type_obj
 		je	@@object
 		cmp	al,type_method
 		je	@@method
 		call	check_variable
 		je	@@var
-		jmp	error_eavmoo
+		jmp	error_easvmoo
+
+
+@@string:	mov	al,bc_string		;enter string bytecode
+		call	enter_obj
+
+		mov	edx,[obj_ptr]		;remember obj_ptr for patching length byte
+
+		mov	al,0			;enter dummy length byte, gets patched later
+		call	enter_obj
+
+		mov	cl,1			;reset length, account for 0 terminator
+		call	back_element		;back up to first character
+@@chr:		call	get_element		;get string chr
+		cmp	al,type_con
+		jne	@@chrerror
+		or	ebx,ebx			;0 not allowed
+		jz	@@chrerror
+		cmp	ebx,0FFh		;above 0FFh not allowed
+		jbe	@@chrok
+@@chrerror:	jmp	error_scmrf
+@@chrok:	mov	al,bl			;enter string chr
+		call	enter_obj
+		inc	cl			;check string length
+		jz	error_scexc
+		cmp	[source_flags],0	;check if string done
+		je	@@strdone
+		call	get_comma		;get comma and loop for next character
+		jmp	@@chr
+@@strdone:
+		mov	al,0			;done, enter 0 to terminate string
+		call	enter_obj
+
+		mov	[obj+edx],cl		;patch length byte
+		ret
 
 
 @@object:	mov	edx,ebx			;obj{[]}.method, preserve obj data
@@ -13825,6 +13966,8 @@ pubcon_byte:	mov	edi,[pubcon_list_size]	;enter byte into pub/con list
 ;*  Disassembler							*
 ;************************************************************************
 ;
+flag_tab	=	37
+
 		count0	disop_addr20			;operand symbols
 		count	disop_aug
 		count	disop_cz
@@ -13875,23 +14018,6 @@ _disassemble:	lea	edi,[disassembler_string]	;edi points to string
 		mov	edx,[disassembler_inst]		;edx holds instruction
 		and	[disassembler_addr],0FFFFFh	;trim address
 
-		mov	al,' '				;print space
-		stosb
-
-		mov	ebx,[disassembler_addr]		;print instruction address
-		mov	cl,5				;5-digit hub address?
-		cmp	ebx,400h
-		jae	@@addr
-		stosb					;3-digit cog address preceded by two spaces
-		stosb
-		mov	cl,3
-@@addr:		mov	eax,ebx
-		call	da_hex				;print address
-
-		mov	al,' '				;print two spaces
-		stosb
-		stosb
-
 		mov	eax,edx				;print condition
 		or	eax,eax
 		mov	al,0Fh				;if NOP, use blank
@@ -13904,8 +14030,7 @@ _disassemble:	lea	edi,[disassembler_string]	;edi points to string
 		mov	ecx,12
 	rep	movsb
 
-		mov	al,' '				;print two spaces
-		stosb
+		mov	al,' '				;print space
 		stosb
 
 		lea	esi,[da_nop]			;if NOP, force NOP record
@@ -13925,15 +14050,19 @@ _disassemble:	lea	edi,[disassembler_string]	;edi points to string
 		mov	ecx,7
 	rep	movsb
 
-		mov	al,' '				;print one space
+		mov	al,' '				;print space
 		stosb
 
 		movzx	eax,ah				;call operand handler
 		call	[@@operands+eax*4]
 
-		mov	cl,50				;print spaces to end of string
-		call	da_tab
-
+		mov	ecx,flag_tab + 4		;print spaces to end of string
+		add	ecx,offset disassembler_string
+		sub	ecx,edi
+		jbe	@@eos				;if at or beyond end of string, just zero-terminate it
+		mov	al,' '
+	rep	stosb
+@@eos:		mov	edi,offset disassembler_string + flag_tab + 4
 		mov	al,0				;zero-terminate string
 		stosb
 
@@ -14031,7 +14160,7 @@ do_dcz_modcz:	mov	eax,edx			;dcz_modcz
 do_ds:		call	da_d			;ds
 		mov	al,','
 		stosb
-		call	da_s
+		jmp	da_s
 
 do_ds_alt:	call	da_d			;ds_alt
 		mov	eax,edx
@@ -14143,7 +14272,7 @@ do_dscz_bit:	call	da_d			;dscz_bit
 do_dscz_bit_log:call	da_d			;dscz_bit_log
 		mov	al,','
 		stosb
-		call	da_s_bit
+		call	da_s_bit_log
 		mov	eax,edx
 		shr	eax,20-8
 		and	ah,1101b
@@ -14201,7 +14330,7 @@ do_lcz:		call	da_l			;lcz
 do_lcz_pin:	call	da_l_pin		;lcz_pin
 		jmp	da_flag
 
-do_lcz_pin_log:	call	da_l_pin		;lcz_pin_log
+do_lcz_pin_log:	call	da_l_pin_log		;lcz_pin_log
 		mov	ah,dl
 		and	ah,110b
 		test	edx,1 shl 20
@@ -14262,6 +14391,12 @@ do_s_pin:	jmp	da_s_pin		;s_pin
 da_ls:		test	edx,1 shl 19		;ls
 		jmp	da_lx
 
+da_l_pin_log:	test	edx,1 shl 18		;l_pin_log
+		jz	da_d
+		mov	al,'#'			;immediate pin
+		stosb
+		jmp	da_l_pin2
+
 da_l_pin:	test	edx,1 shl 18		;l_pin
 		jz	da_d
 		mov	al,'#'			;immediate pin
@@ -14311,6 +14446,12 @@ da_d:		mov	eax,edx			;register
 ;
 ; Print (#)s
 ;
+da_s_bit_log:	test	edx,1 shl 18		;s_bit_log
+		jz	da_s
+		mov	al,'#'			;immediate pin
+		stosb
+		jmp	da_s_bit2
+
 da_s_bit:	test	edx,1 shl 18		;s_bit
 		jz	da_s
 		mov	al,'#'			;immediate pin
@@ -14434,15 +14575,12 @@ da_s_ptr:	test	edx,1 shl 18		;register or immediate?
 		jz	@@pos
 		mov	al,'-'
 		stosb
-@@pos:		mov	al,'$'
-		stosb
-		mov	al,dl
+@@pos:		mov	al,dl
 		test	al,20h
 		jz	@@pos2
 		neg	al
 @@pos2:		and	al,3Fh
-		mov	cl,2
-		call	da_hex
+		call	da_dec
 		mov	al,']'
 		stosb
 @@exit:		ret
@@ -14473,26 +14611,24 @@ da_s_ptr:	test	edx,1 shl 18		;register or immediate?
 		test	dl,0Fh
 		jnz	@@abs
 		mov	ah,10h
-@@abs:		mov	al,'$'
-		stosb
-		mov	al,ah
-		mov	cl,2
-		call	da_hex
+@@abs:		mov	al,ah
+		and	al,1Fh
+		call	da_dec
 		mov	al,']'
 		stosb
 		ret
 
 
-@@ptrx:		mov	al,'P'
+@@ptrx:		mov	al,'p'
 		stosb
-		mov	al,'T'
+		mov	al,'t'
 		stosb
-		mov	al,'R'
+		mov	al,'r'
 		stosb
-		mov	al,'A'
+		mov	al,'a'
 		test	dl,80h
 		jz	@@ptra
-		mov	al,'B'
+		mov	al,'b'
 @@ptra:		stosb
 		ret
 
@@ -14507,8 +14643,7 @@ da_s_ptr:	test	edx,1 shl 18		;register or immediate?
 ;
 ; Print flag
 ;
-da_flag:	mov	cl,44		;tab to flag position
-		call	da_tab
+da_flag:	call	da_flag_tab	;tab to flag position
 
 		mov	eax,edx		;isolate flag bits
 		shr	eax,19
@@ -14523,16 +14658,15 @@ da_flag:	mov	cl,44		;tab to flag position
 
 
 @@flag	db	'    '			;flag effects (4 bytes each)
-	db	'WZ  '
-	db	'WC  '
-	db	'WCZ '
+	db	'wz  '
+	db	'wc  '
+	db	'wcz '
 ;
 ;
 ; Print flag logic
 ; ah = logic
 ;
-da_flag_logic:	mov	cl,44		;tab to flag position
-		call	da_tab
+da_flag_logic:	call	da_flag_tab	;tab to flag position
 
 		movzx	eax,ah		;get index
 		shl	eax,2		;multiply by four and point to flag string
@@ -14544,14 +14678,31 @@ da_flag_logic:	mov	cl,44		;tab to flag position
 		ret
 
 
-@@flag	db	'WZ  '			;flag effects (4 bytes each)
-	db	'WC  '
-	db	'ANDZ'
-	db	'ANDC'
-	db	'ORZ '
-	db	'ORC '
-	db	'XORZ'
-	db	'XORC'
+@@flag	db	'wz  '			;flag effects (4 bytes each)
+	db	'wc  '
+	db	'andz'
+	db	'andc'
+	db	'orz '
+	db	'orc '
+	db	'xorz'
+	db	'xorc'
+;
+;
+; Tab to cl
+;
+da_flag_tab:	mov	ecx,flag_tab	;need to print more spaces?
+		add	ecx,offset disassembler_string	;print spaces to end of string
+		sub	ecx,edi
+		ja	@@tab
+
+		add	edi,ecx		;back up and print space
+		dec	edi
+		mov	ecx,1
+
+@@tab:		mov	al,' '
+	rep	stosb
+
+		ret
 ;
 ;
 ; Print 20-bit address
@@ -14559,11 +14710,21 @@ da_flag_logic:	mov	cl,44		;tab to flag position
 da_addr20:	mov	al,'#'		;print '#'
 		stosb
 
+		mov	eax,[disassembler_addr]
+
 		test	edx,100000h	;relative or absolute?
 		jz	@@abs
 
-		mov	eax,edx		;relative
-		add	eax,[disassembler_addr]
+		cmp	eax,400h	;relative cog or hub?
+		jae	@@relhub
+
+		shl	edx,31-19	;relative cog
+		sar	edx,31-19+2
+		add	eax,edx
+		inc	eax
+		jmp	da_addr
+
+@@relhub:	add	eax,edx		;relative hub
 		add	eax,4
 		jmp	da_addr
 
@@ -14659,68 +14820,57 @@ da_opstr:	cmp	ah,0		;at operand yet?
 @@done:		ret
 ;
 ;
-; Tab to cl
-;
-da_tab:		movzx	ecx,cl
-		add	ecx,offset disassembler_string	;print spaces to end of string
-		sub	ecx,edi
-		mov	al,' '
-	rep	stosb
-
-		ret
-;
-;
 ; Data
 ;
-da_mods	db	'_CLR',0		;MODCZ operands
-	db	'_NC_AND_NZ',0
-	db	'_NC_AND_Z',0
-	db	'_NC',0
-	db	'_C_AND_NZ',0
-	db	'_NZ',0
-	db	'_C_NE_Z',0
-	db	'_NC_OR_NZ',0
-	db	'_C_AND_Z',0
-	db	'_C_EQ_Z',0
-	db	'_Z',0
-	db	'_NC_OR_Z',0
-	db	'_C',0
-	db	'_C_OR_NZ',0
-	db	'_C_OR_Z',0
-	db	'_SET',0
+da_mods	db	'_clr',0		;MODCZ operands
+	db	'_nc_and_nz',0
+	db	'_nc_and_z',0
+	db	'_nc',0
+	db	'_c_and_nz',0
+	db	'_nz',0
+	db	'_c_ne_z',0
+	db	'_nc_or_nz',0
+	db	'_c_and_z',0
+	db	'_c_eq_z',0
+	db	'_z',0
+	db	'_nc_or_z',0
+	db	'_c',0
+	db	'_c_or_nz',0
+	db	'_c_or_z',0
+	db	'_set',0
 
-da_regs	db	'IJMP3',0		;IJMP3..INB operands
-	db	'IRET3',0
-	db	'IJMP2',0
-	db	'IRET2',0
-	db	'IJMP1',0
-	db	'IRET1',0
-	db	'PA',0
-	db	'PB',0
-	db	'PTRA',0
-	db	'PTRB',0
-	db	'DIRA',0
-	db	'DIRB',0
-	db	'OUTA',0
-	db	'OUTB',0
-	db	'INA',0
-	db	'INB',0
+da_regs	db	'ijmp3',0		;IJMP3..INB operands
+	db	'iret3',0
+	db	'ijmp2',0
+	db	'iret2',0
+	db	'ijmp1',0
+	db	'iret1',0
+	db	'pa',0
+	db	'pb',0
+	db	'ptra',0
+	db	'ptrb',0
+	db	'dira',0
+	db	'dirb',0
+	db	'outa',0
+	db	'outb',0
+	db	'ina',0
+	db	'inb',0
 
-da_cond	db	'_RET_       '		;conditions (12 bytes each)
-	db	'IF_NC_AND_NZ'
-	db	'IF_NC_AND_Z '
-	db	'IF_NC       '
-	db	'IF_C_AND_NZ '
-	db	'IF_NZ       '
-	db	'IF_C_NE_Z   '
-	db	'IF_NC_OR_NZ '
-	db	'IF_C_AND_Z  '
-	db	'IF_C_EQ_Z   '
-	db	'IF_Z        '
-	db	'IF_NC_OR_Z  '
-	db	'IF_C        '
-	db	'IF_C_OR_NZ  '
-	db	'IF_C_OR_Z   '
+da_cond	db	'_ret_       '		;conditions (12 bytes each)
+	db	'if_nc_and_nz'
+	db	'if_nc_and_z '
+	db	'if_nc       '
+	db	'if_c_and_nz '
+	db	'if_nz       '
+	db	'if_c_ne_z   '
+	db	'if_nc_or_nz '
+	db	'if_c_and_z  '
+	db	'if_c_eq_z   '
+	db	'if_z        '
+	db	'if_nc_or_z  '
+	db	'if_c        '
+	db	'if_c_or_nz  '
+	db	'if_c_or_z   '
 	db	'            '
 
 macro	disasm	mnem,im,dm,sm,iv,dv,sv,disop	;macro for disassembler table entries
@@ -14730,403 +14880,405 @@ macro	disasm	mnem,im,dm,sm,iv,dv,sv,disop	;macro for disassembler table entries
 	db	mnem
 	endm
 
-da_ins:	disasm	'ROR    ',	3F8h, 000h, 000h,	000h, 000h, 000h,	disop_dscz
-	disasm	'ROL    ',	3F8h, 000h, 000h,	008h, 000h, 000h,	disop_dscz
-	disasm	'SHR    ',	3F8h, 000h, 000h,	010h, 000h, 000h,	disop_dscz
-	disasm	'SHL    ',	3F8h, 000h, 000h,	018h, 000h, 000h,	disop_dscz
-	disasm	'RCR    ',	3F8h, 000h, 000h,	020h, 000h, 000h,	disop_dscz
-	disasm	'RCL    ',	3F8h, 000h, 000h,	028h, 000h, 000h,	disop_dscz
-	disasm	'SAR    ',	3F8h, 000h, 000h,	030h, 000h, 000h,	disop_dscz
-	disasm	'SAL    ',	3F8h, 000h, 000h,	038h, 000h, 000h,	disop_dscz
-	disasm	'ADD    ',	3F8h, 000h, 000h,	040h, 000h, 000h,	disop_dscz
-	disasm	'ADDX   ',	3F8h, 000h, 000h,	048h, 000h, 000h,	disop_dscz
-	disasm	'ADDS   ',	3F8h, 000h, 000h,	050h, 000h, 000h,	disop_dscz
-	disasm	'ADDSX  ',	3F8h, 000h, 000h,	058h, 000h, 000h,	disop_dscz
-	disasm	'SUB    ',	3F8h, 000h, 000h,	060h, 000h, 000h,	disop_dscz
-	disasm	'SUBX   ',	3F8h, 000h, 000h,	068h, 000h, 000h,	disop_dscz
-	disasm	'SUBS   ',	3F8h, 000h, 000h,	070h, 000h, 000h,	disop_dscz
-	disasm	'SUBSX  ',	3F8h, 000h, 000h,	078h, 000h, 000h,	disop_dscz
-	disasm	'CMP    ',	3F8h, 000h, 000h,	080h, 000h, 000h,	disop_dscz
-	disasm	'CMPX   ',	3F8h, 000h, 000h,	088h, 000h, 000h,	disop_dscz
-	disasm	'CMPS   ',	3F8h, 000h, 000h,	090h, 000h, 000h,	disop_dscz
-	disasm	'CMPSX  ',	3F8h, 000h, 000h,	098h, 000h, 000h,	disop_dscz
-	disasm	'CMPR   ',	3F8h, 000h, 000h,	0A0h, 000h, 000h,	disop_dscz
-	disasm	'CMPM   ',	3F8h, 000h, 000h,	0A8h, 000h, 000h,	disop_dscz
-	disasm	'SUBR   ',	3F8h, 000h, 000h,	0B0h, 000h, 000h,	disop_dscz
-	disasm	'CMPSUB ',	3F8h, 000h, 000h,	0B8h, 000h, 000h,	disop_dscz
-	disasm	'FGE    ',	3F8h, 000h, 000h,	0C0h, 000h, 000h,	disop_dscz
-	disasm	'FLE    ',	3F8h, 000h, 000h,	0C8h, 000h, 000h,	disop_dscz
-	disasm	'FGES   ',	3F8h, 000h, 000h,	0D0h, 000h, 000h,	disop_dscz
-	disasm	'FLES   ',	3F8h, 000h, 000h,	0D8h, 000h, 000h,	disop_dscz
-	disasm	'SUMC   ',	3F8h, 000h, 000h,	0E0h, 000h, 000h,	disop_dscz
-	disasm	'SUMNC  ',	3F8h, 000h, 000h,	0E8h, 000h, 000h,	disop_dscz
-	disasm	'SUMZ   ',	3F8h, 000h, 000h,	0F0h, 000h, 000h,	disop_dscz
-	disasm	'SUMNZ  ',	3F8h, 000h, 000h,	0F8h, 000h, 000h,	disop_dscz
+da_ins:	disasm	'ror    ',	3F8h, 000h, 000h,	000h, 000h, 000h,	disop_dscz
+	disasm	'rol    ',	3F8h, 000h, 000h,	008h, 000h, 000h,	disop_dscz
+	disasm	'shr    ',	3F8h, 000h, 000h,	010h, 000h, 000h,	disop_dscz
+	disasm	'shl    ',	3F8h, 000h, 000h,	018h, 000h, 000h,	disop_dscz
+	disasm	'rcr    ',	3F8h, 000h, 000h,	020h, 000h, 000h,	disop_dscz
+	disasm	'rcl    ',	3F8h, 000h, 000h,	028h, 000h, 000h,	disop_dscz
+	disasm	'sar    ',	3F8h, 000h, 000h,	030h, 000h, 000h,	disop_dscz
+	disasm	'sal    ',	3F8h, 000h, 000h,	038h, 000h, 000h,	disop_dscz
+	disasm	'add    ',	3F8h, 000h, 000h,	040h, 000h, 000h,	disop_dscz
+	disasm	'addx   ',	3F8h, 000h, 000h,	048h, 000h, 000h,	disop_dscz
+	disasm	'adds   ',	3F8h, 000h, 000h,	050h, 000h, 000h,	disop_dscz
+	disasm	'addsx  ',	3F8h, 000h, 000h,	058h, 000h, 000h,	disop_dscz
+	disasm	'sub    ',	3F8h, 000h, 000h,	060h, 000h, 000h,	disop_dscz
+	disasm	'subx   ',	3F8h, 000h, 000h,	068h, 000h, 000h,	disop_dscz
+	disasm	'subs   ',	3F8h, 000h, 000h,	070h, 000h, 000h,	disop_dscz
+	disasm	'subsx  ',	3F8h, 000h, 000h,	078h, 000h, 000h,	disop_dscz
+	disasm	'cmp    ',	3F8h, 000h, 000h,	080h, 000h, 000h,	disop_dscz
+	disasm	'cmpx   ',	3F8h, 000h, 000h,	088h, 000h, 000h,	disop_dscz
+	disasm	'cmps   ',	3F8h, 000h, 000h,	090h, 000h, 000h,	disop_dscz
+	disasm	'cmpsx  ',	3F8h, 000h, 000h,	098h, 000h, 000h,	disop_dscz
+	disasm	'cmpr   ',	3F8h, 000h, 000h,	0A0h, 000h, 000h,	disop_dscz
+	disasm	'cmpm   ',	3F8h, 000h, 000h,	0A8h, 000h, 000h,	disop_dscz
+	disasm	'subr   ',	3F8h, 000h, 000h,	0B0h, 000h, 000h,	disop_dscz
+	disasm	'cmpsub ',	3F8h, 000h, 000h,	0B8h, 000h, 000h,	disop_dscz
+	disasm	'fge    ',	3F8h, 000h, 000h,	0C0h, 000h, 000h,	disop_dscz
+	disasm	'fle    ',	3F8h, 000h, 000h,	0C8h, 000h, 000h,	disop_dscz
+	disasm	'fges   ',	3F8h, 000h, 000h,	0D0h, 000h, 000h,	disop_dscz
+	disasm	'fles   ',	3F8h, 000h, 000h,	0D8h, 000h, 000h,	disop_dscz
+	disasm	'sumc   ',	3F8h, 000h, 000h,	0E0h, 000h, 000h,	disop_dscz
+	disasm	'sumnc  ',	3F8h, 000h, 000h,	0E8h, 000h, 000h,	disop_dscz
+	disasm	'sumz   ',	3F8h, 000h, 000h,	0F0h, 000h, 000h,	disop_dscz
+	disasm	'sumnz  ',	3F8h, 000h, 000h,	0F8h, 000h, 000h,	disop_dscz
 
-	disasm	'TESTB  ',	3CEh, 000h, 000h,	102h, 000h, 000h,	disop_dscz_bit_log
-	disasm	'TESTB  ',	3CEh, 000h, 000h,	104h, 000h, 000h,	disop_dscz_bit_log
-	disasm	'TESTBN ',	3CEh, 000h, 000h,	10Ah, 000h, 000h,	disop_dscz_bit_log
-	disasm	'TESTBN ',	3CEh, 000h, 000h,	10Ch, 000h, 000h,	disop_dscz_bit_log
+	disasm	'testb  ',	3CEh, 000h, 000h,	102h, 000h, 000h,	disop_dscz_bit_log
+	disasm	'testb  ',	3CEh, 000h, 000h,	104h, 000h, 000h,	disop_dscz_bit_log
+	disasm	'testbn ',	3CEh, 000h, 000h,	10Ah, 000h, 000h,	disop_dscz_bit_log
+	disasm	'testbn ',	3CEh, 000h, 000h,	10Ch, 000h, 000h,	disop_dscz_bit_log
 
-	disasm	'BITL   ',	3F8h, 000h, 000h,	100h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITH   ',	3F8h, 000h, 000h,	108h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITC   ',	3F8h, 000h, 000h,	110h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITNC  ',	3F8h, 000h, 000h,	118h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITZ   ',	3F8h, 000h, 000h,	120h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITNZ  ',	3F8h, 000h, 000h,	128h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITRND ',	3F8h, 000h, 000h,	130h, 000h, 000h,	disop_dscz_bit
-	disasm	'BITNOT ',	3F8h, 000h, 000h,	138h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitl   ',	3F8h, 000h, 000h,	100h, 000h, 000h,	disop_dscz_bit
+	disasm	'bith   ',	3F8h, 000h, 000h,	108h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitc   ',	3F8h, 000h, 000h,	110h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitnc  ',	3F8h, 000h, 000h,	118h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitz   ',	3F8h, 000h, 000h,	120h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitnz  ',	3F8h, 000h, 000h,	128h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitrnd ',	3F8h, 000h, 000h,	130h, 000h, 000h,	disop_dscz_bit
+	disasm	'bitnot ',	3F8h, 000h, 000h,	138h, 000h, 000h,	disop_dscz_bit
 
-	disasm	'AND    ',	3F8h, 000h, 000h,	140h, 000h, 000h,	disop_dscz
-	disasm	'ANDN   ',	3F8h, 000h, 000h,	148h, 000h, 000h,	disop_dscz
-	disasm	'OR     ',	3F8h, 000h, 000h,	150h, 000h, 000h,	disop_dscz
-	disasm	'XOR    ',	3F8h, 000h, 000h,	158h, 000h, 000h,	disop_dscz
-	disasm	'MUXC   ',	3F8h, 000h, 000h,	160h, 000h, 000h,	disop_dscz
-	disasm	'MUXNC  ',	3F8h, 000h, 000h,	168h, 000h, 000h,	disop_dscz
-	disasm	'MUXZ   ',	3F8h, 000h, 000h,	170h, 000h, 000h,	disop_dscz
-	disasm	'MUXNZ  ',	3F8h, 000h, 000h,	178h, 000h, 000h,	disop_dscz
+	disasm	'and    ',	3F8h, 000h, 000h,	140h, 000h, 000h,	disop_dscz
+	disasm	'andn   ',	3F8h, 000h, 000h,	148h, 000h, 000h,	disop_dscz
+	disasm	'or     ',	3F8h, 000h, 000h,	150h, 000h, 000h,	disop_dscz
+	disasm	'xor    ',	3F8h, 000h, 000h,	158h, 000h, 000h,	disop_dscz
+	disasm	'muxc   ',	3F8h, 000h, 000h,	160h, 000h, 000h,	disop_dscz
+	disasm	'muxnc  ',	3F8h, 000h, 000h,	168h, 000h, 000h,	disop_dscz
+	disasm	'muxz   ',	3F8h, 000h, 000h,	170h, 000h, 000h,	disop_dscz
+	disasm	'muxnz  ',	3F8h, 000h, 000h,	178h, 000h, 000h,	disop_dscz
 
-	disasm	'MOV    ',	3F8h, 000h, 000h,	180h, 000h, 000h,	disop_dscz
-	disasm	'NOT    ',	3F8h, 000h, 000h,	188h, 000h, 000h,	disop_dscz_single
-	disasm	'ABS    ',	3F8h, 000h, 000h,	190h, 000h, 000h,	disop_dscz_single
-	disasm	'NEG    ',	3F8h, 000h, 000h,	198h, 000h, 000h,	disop_dscz_single
-	disasm	'NEGC   ',	3F8h, 000h, 000h,	1A0h, 000h, 000h,	disop_dscz_single
-	disasm	'NEGNC  ',	3F8h, 000h, 000h,	1A8h, 000h, 000h,	disop_dscz_single
-	disasm	'NEGZ   ',	3F8h, 000h, 000h,	1B0h, 000h, 000h,	disop_dscz_single
-	disasm	'NEGNZ  ',	3F8h, 000h, 000h,	1B8h, 000h, 000h,	disop_dscz_single
+	disasm	'mov    ',	3F8h, 000h, 000h,	180h, 000h, 000h,	disop_dscz
+	disasm	'not    ',	3F8h, 000h, 000h,	188h, 000h, 000h,	disop_dscz_single
+	disasm	'abs    ',	3F8h, 000h, 000h,	190h, 000h, 000h,	disop_dscz_single
+	disasm	'neg    ',	3F8h, 000h, 000h,	198h, 000h, 000h,	disop_dscz_single
+	disasm	'negc   ',	3F8h, 000h, 000h,	1A0h, 000h, 000h,	disop_dscz_single
+	disasm	'negnc  ',	3F8h, 000h, 000h,	1A8h, 000h, 000h,	disop_dscz_single
+	disasm	'negz   ',	3F8h, 000h, 000h,	1B0h, 000h, 000h,	disop_dscz_single
+	disasm	'negnz  ',	3F8h, 000h, 000h,	1B8h, 000h, 000h,	disop_dscz_single
 
-	disasm	'INCMOD ',	3F8h, 000h, 000h,	1C0h, 000h, 000h,	disop_dscz
-	disasm	'DECMOD ',	3F8h, 000h, 000h,	1C8h, 000h, 000h,	disop_dscz
-	disasm	'ZEROX  ',	3F8h, 000h, 000h,	1D0h, 000h, 000h,	disop_dscz
-	disasm	'SIGNX  ',	3F8h, 000h, 000h,	1D8h, 000h, 000h,	disop_dscz
-	disasm	'ENCOD  ',	3F8h, 000h, 000h,	1E0h, 000h, 000h,	disop_dscz_single
-	disasm	'ONES   ',	3F8h, 000h, 000h,	1E8h, 000h, 000h,	disop_dscz_single
-	disasm	'TEST   ',	3F8h, 000h, 000h,	1F0h, 000h, 000h,	disop_dscz_single
-	disasm	'TESTN  ',	3F8h, 000h, 000h,	1F8h, 000h, 000h,	disop_dscz
+	disasm	'incmod ',	3F8h, 000h, 000h,	1C0h, 000h, 000h,	disop_dscz
+	disasm	'decmod ',	3F8h, 000h, 000h,	1C8h, 000h, 000h,	disop_dscz
+	disasm	'zerox  ',	3F8h, 000h, 000h,	1D0h, 000h, 000h,	disop_dscz
+	disasm	'signx  ',	3F8h, 000h, 000h,	1D8h, 000h, 000h,	disop_dscz
+	disasm	'encod  ',	3F8h, 000h, 000h,	1E0h, 000h, 000h,	disop_dscz_single
+	disasm	'ones   ',	3F8h, 000h, 000h,	1E8h, 000h, 000h,	disop_dscz_single
+	disasm	'test   ',	3F8h, 000h, 000h,	1F0h, 000h, 000h,	disop_dscz_single
+	disasm	'testn  ',	3F8h, 000h, 000h,	1F8h, 000h, 000h,	disop_dscz
 
-	disasm	'SETNIB ',	3F0h, 000h, 000h,	200h, 000h, 000h,	disop_ds_nib
-	disasm	'GETNIB ',	3F0h, 000h, 000h,	210h, 000h, 000h,	disop_ds_nib
-	disasm	'ROLNIB ',	3F0h, 000h, 000h,	220h, 000h, 000h,	disop_ds_nib
+	disasm	'setnib ',	3F0h, 000h, 000h,	200h, 000h, 000h,	disop_ds_nib
+	disasm	'getnib ',	3F0h, 000h, 000h,	210h, 000h, 000h,	disop_ds_nib
+	disasm	'rolnib ',	3F0h, 000h, 000h,	220h, 000h, 000h,	disop_ds_nib
 
-	disasm	'SETBYTE',	3F8h, 000h, 000h,	230h, 000h, 000h,	disop_ds_byte
-	disasm	'GETBYTE',	3F8h, 000h, 000h,	238h, 000h, 000h,	disop_ds_byte
-	disasm	'ROLBYTE',	3F8h, 000h, 000h,	240h, 000h, 000h,	disop_ds_byte
+	disasm	'setbyte',	3F8h, 000h, 000h,	230h, 000h, 000h,	disop_ds_byte
+	disasm	'getbyte',	3F8h, 000h, 000h,	238h, 000h, 000h,	disop_ds_byte
+	disasm	'rolbyte',	3F8h, 000h, 000h,	240h, 000h, 000h,	disop_ds_byte
 
-	disasm	'SETWORD',	3FCh, 000h, 000h,	248h, 000h, 000h,	disop_ds_word
-	disasm	'GETWORD',	3FCh, 000h, 000h,	24Ch, 000h, 000h,	disop_ds_word
-	disasm	'ROLWORD',	3FCh, 000h, 000h,	250h, 000h, 000h,	disop_ds_word
+	disasm	'setword',	3FCh, 000h, 000h,	248h, 000h, 000h,	disop_ds_word
+	disasm	'getword',	3FCh, 000h, 000h,	24Ch, 000h, 000h,	disop_ds_word
+	disasm	'rolword',	3FCh, 000h, 000h,	250h, 000h, 000h,	disop_ds_word
 
-	disasm	'ALTSN  ',	3FEh, 000h, 000h,	254h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTGN  ',	3FEh, 000h, 000h,	256h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTSB  ',	3FEh, 000h, 000h,	258h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTGB  ',	3FEh, 000h, 000h,	25Ah, 000h, 000h,	disop_ds_alt
-	disasm	'ALTSW  ',	3FEh, 000h, 000h,	25Ch, 000h, 000h,	disop_ds_alt
-	disasm	'ALTGW  ',	3FEh, 000h, 000h,	25Eh, 000h, 000h,	disop_ds_alt
-	disasm	'ALTR   ',	3FEh, 000h, 000h,	260h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTD   ',	3FEh, 000h, 000h,	262h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTS   ',	3FEh, 000h, 000h,	264h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTB   ',	3FEh, 000h, 000h,	266h, 000h, 000h,	disop_ds_alt
-	disasm	'ALTI   ',	3FEh, 000h, 000h,	268h, 000h, 000h,	disop_ds_alti
-	disasm	'SETR   ',	3FEh, 000h, 000h,	26Ah, 000h, 000h,	disop_ds
-	disasm	'SETD   ',	3FEh, 000h, 000h,	26Ch, 000h, 000h,	disop_ds
-	disasm	'SETS   ',	3FEh, 000h, 000h,	26Eh, 000h, 000h,	disop_ds
-	disasm	'DECOD  ',	3FEh, 000h, 000h,	270h, 000h, 000h,	disop_ds_single
-	disasm	'BMASK  ',	3FEh, 000h, 000h,	272h, 000h, 000h,	disop_ds_single
-	disasm	'CRCBIT ',	3FEh, 000h, 000h,	274h, 000h, 000h,	disop_ds
-	disasm	'CRCNIB ',	3FEh, 000h, 000h,	276h, 000h, 000h,	disop_ds
-	disasm	'MUXNITS',	3FEh, 000h, 000h,	278h, 000h, 000h,	disop_ds
-	disasm	'MUXNIBS',	3FEh, 000h, 000h,	27Ah, 000h, 000h,	disop_ds
-	disasm	'MUXQ   ',	3FEh, 000h, 000h,	27Ch, 000h, 000h,	disop_ds
-	disasm	'MOVBYTS',	3FEh, 000h, 000h,	27Eh, 000h, 000h,	disop_ds
+	disasm	'altsn  ',	3FEh, 000h, 000h,	254h, 000h, 000h,	disop_ds_alt
+	disasm	'altgn  ',	3FEh, 000h, 000h,	256h, 000h, 000h,	disop_ds_alt
+	disasm	'altsb  ',	3FEh, 000h, 000h,	258h, 000h, 000h,	disop_ds_alt
+	disasm	'altgb  ',	3FEh, 000h, 000h,	25Ah, 000h, 000h,	disop_ds_alt
+	disasm	'altsw  ',	3FEh, 000h, 000h,	25Ch, 000h, 000h,	disop_ds_alt
+	disasm	'altgw  ',	3FEh, 000h, 000h,	25Eh, 000h, 000h,	disop_ds_alt
+	disasm	'altr   ',	3FEh, 000h, 000h,	260h, 000h, 000h,	disop_ds_alt
+	disasm	'altd   ',	3FEh, 000h, 000h,	262h, 000h, 000h,	disop_ds_alt
+	disasm	'alts   ',	3FEh, 000h, 000h,	264h, 000h, 000h,	disop_ds_alt
+	disasm	'altb   ',	3FEh, 000h, 000h,	266h, 000h, 000h,	disop_ds_alt
+	disasm	'alti   ',	3FEh, 000h, 000h,	268h, 000h, 000h,	disop_ds_alti
+	disasm	'setr   ',	3FEh, 000h, 000h,	26Ah, 000h, 000h,	disop_ds
+	disasm	'setd   ',	3FEh, 000h, 000h,	26Ch, 000h, 000h,	disop_ds
+	disasm	'sets   ',	3FEh, 000h, 000h,	26Eh, 000h, 000h,	disop_ds
+	disasm	'decod  ',	3FEh, 000h, 000h,	270h, 000h, 000h,	disop_ds_single
+	disasm	'bmask  ',	3FEh, 000h, 000h,	272h, 000h, 000h,	disop_ds_single
+	disasm	'crcbit ',	3FEh, 000h, 000h,	274h, 000h, 000h,	disop_ds
+	disasm	'crcnib ',	3FEh, 000h, 000h,	276h, 000h, 000h,	disop_ds
+	disasm	'muxnits',	3FEh, 000h, 000h,	278h, 000h, 000h,	disop_ds
+	disasm	'muxnibs',	3FEh, 000h, 000h,	27Ah, 000h, 000h,	disop_ds
+	disasm	'muxq   ',	3FEh, 000h, 000h,	27Ch, 000h, 000h,	disop_ds
+	disasm	'movbyts',	3FEh, 000h, 000h,	27Eh, 000h, 000h,	disop_ds
 
-	disasm	'MUL    ',	3FCh, 000h, 000h,	280h, 000h, 000h,	disop_dsz
-	disasm	'MULS   ',	3FCh, 000h, 000h,	284h, 000h, 000h,	disop_dsz
-	disasm	'SCA    ',	3FCh, 000h, 000h,	288h, 000h, 000h,	disop_dsz
-	disasm	'SCAS   ',	3FCh, 000h, 000h,	28Ch, 000h, 000h,	disop_dsz
+	disasm	'mul    ',	3FCh, 000h, 000h,	280h, 000h, 000h,	disop_dsz
+	disasm	'muls   ',	3FCh, 000h, 000h,	284h, 000h, 000h,	disop_dsz
+	disasm	'sca    ',	3FCh, 000h, 000h,	288h, 000h, 000h,	disop_dsz
+	disasm	'scas   ',	3FCh, 000h, 000h,	28Ch, 000h, 000h,	disop_dsz
 
-	disasm	'ADDPIX ',	3FEh, 000h, 000h,	290h, 000h, 000h,	disop_ds
-	disasm	'MULPIX ',	3FEh, 000h, 000h,	292h, 000h, 000h,	disop_ds
-	disasm	'BLNPIX ',	3FEh, 000h, 000h,	294h, 000h, 000h,	disop_ds
-	disasm	'MIXPIX ',	3FEh, 000h, 000h,	296h, 000h, 000h,	disop_ds
-	disasm	'ADDCT1 ',	3FEh, 000h, 000h,	298h, 000h, 000h,	disop_ds
-	disasm	'ADDCT2 ',	3FEh, 000h, 000h,	29Ah, 000h, 000h,	disop_ds
-	disasm	'ADDCT3 ',	3FEh, 000h, 000h,	29Ch, 000h, 000h,	disop_ds
-	disasm	'WMLONG ',	3FEh, 000h, 000h,	29Eh, 000h, 000h,	disop_ds_ptr
-	disasm	'RQPIN  ',	3FAh, 000h, 000h,	2A0h, 000h, 000h,	disop_dsc
-	disasm	'RDPIN  ',	3FAh, 000h, 000h,	2A2h, 000h, 000h,	disop_dsc
-	disasm	'RDLUT  ',	3F8h, 000h, 000h,	2A8h, 000h, 000h,	disop_dscz_ptr
-	disasm	'RDBYTE ',	3F8h, 000h, 000h,	2B0h, 000h, 000h,	disop_dscz_ptr
-	disasm	'RDWORD ',	3F8h, 000h, 000h,	2B8h, 000h, 000h,	disop_dscz_ptr
-	disasm	'POPA   ',	3F9h, 000h, 1FFh,	2C1h, 000h, 15Fh,	disop_dcz
-	disasm	'POPB   ',	3F9h, 000h, 1FFh,	2C1h, 000h, 1Dfh,	disop_dcz
-	disasm	'RDLONG ',	3F8h, 000h, 000h,	2C0h, 000h, 000h,	disop_dscz_ptr
+	disasm	'addpix ',	3FEh, 000h, 000h,	290h, 000h, 000h,	disop_ds
+	disasm	'mulpix ',	3FEh, 000h, 000h,	292h, 000h, 000h,	disop_ds
+	disasm	'blnpix ',	3FEh, 000h, 000h,	294h, 000h, 000h,	disop_ds
+	disasm	'mixpix ',	3FEh, 000h, 000h,	296h, 000h, 000h,	disop_ds
+	disasm	'addct1 ',	3FEh, 000h, 000h,	298h, 000h, 000h,	disop_ds
+	disasm	'addct2 ',	3FEh, 000h, 000h,	29Ah, 000h, 000h,	disop_ds
+	disasm	'addct3 ',	3FEh, 000h, 000h,	29Ch, 000h, 000h,	disop_ds
+	disasm	'wmlong ',	3FEh, 000h, 000h,	29Eh, 000h, 000h,	disop_ds_ptr
+	disasm	'rqpin  ',	3FAh, 000h, 000h,	2A0h, 000h, 000h,	disop_dsc
+	disasm	'rdpin  ',	3FAh, 000h, 000h,	2A2h, 000h, 000h,	disop_dsc
+	disasm	'rdlut  ',	3F8h, 000h, 000h,	2A8h, 000h, 000h,	disop_dscz_ptr
+	disasm	'rdbyte ',	3F8h, 000h, 000h,	2B0h, 000h, 000h,	disop_dscz_ptr
+	disasm	'rdword ',	3F8h, 000h, 000h,	2B8h, 000h, 000h,	disop_dscz_ptr
+	disasm	'popa   ',	3F9h, 000h, 1FFh,	2C1h, 000h, 15Fh,	disop_dcz
+	disasm	'popb   ',	3F9h, 000h, 1FFh,	2C1h, 000h, 1Dfh,	disop_dcz
+	disasm	'rdlong ',	3F8h, 000h, 000h,	2C0h, 000h, 000h,	disop_dscz_ptr
 
-	disasm	'RESI3  ',	3FFh, 1FFh, 1FFh,	2CEh, 1F0h, 1F1h,	disop_none
-	disasm	'RESI2  ',	3FFh, 1FFh, 1FFh,	2CEh, 1F2h, 1F3h,	disop_none
-	disasm	'RESI1  ',	3FFh, 1FFh, 1FFh,	2CEh, 1F4h, 1F5h,	disop_none
-	disasm	'RESI0  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FEh, 1FFh,	disop_none
-	disasm	'RETI3  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1F1h,	disop_none
-	disasm	'RETI2  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1F3h,	disop_none
-	disasm	'RETI1  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1F5h,	disop_none
-	disasm	'RETI0  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1FFh,	disop_none
-	disasm	'CALLD  ',	3F8h, 000h, 000h,	2C8h, 000h, 000h,	disop_dscz_branch
+	disasm	'resi3  ',	3FFh, 1FFh, 1FFh,	2CEh, 1F0h, 1F1h,	disop_none
+	disasm	'resi2  ',	3FFh, 1FFh, 1FFh,	2CEh, 1F2h, 1F3h,	disop_none
+	disasm	'resi1  ',	3FFh, 1FFh, 1FFh,	2CEh, 1F4h, 1F5h,	disop_none
+	disasm	'resi0  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FEh, 1FFh,	disop_none
+	disasm	'reti3  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1F1h,	disop_none
+	disasm	'reti2  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1F3h,	disop_none
+	disasm	'reti1  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1F5h,	disop_none
+	disasm	'reti0  ',	3FFh, 1FFh, 1FFh,	2CEh, 1FFh, 1FFh,	disop_none
+	disasm	'calld  ',	3F8h, 000h, 000h,	2C8h, 000h, 000h,	disop_dscz_branch
 
-	disasm	'CALLPA ',	3FCh, 000h, 000h,	2D0h, 000h, 000h,	disop_ls_branch
-	disasm	'CALLPB ',	3FCh, 000h, 000h,	2D4h, 000h, 000h,	disop_ls_branch
-	disasm	'DJZ    ',	3FEh, 000h, 000h,	2D8h, 000h, 000h,	disop_ds_branch
-	disasm	'DJNZ   ',	3FEh, 000h, 000h,	2DAh, 000h, 000h,	disop_ds_branch
-	disasm	'DJF    ',	3FEh, 000h, 000h,	2DCh, 000h, 000h,	disop_ds_branch
-	disasm	'DJNF   ',	3FEh, 000h, 000h,	2DEh, 000h, 000h,	disop_ds_branch
-	disasm	'IJZ    ',	3FEh, 000h, 000h,	2E0h, 000h, 000h,	disop_ds_branch
-	disasm	'IJNZ   ',	3FEh, 000h, 000h,	2E2h, 000h, 000h,	disop_ds_branch
-	disasm	'TJZ    ',	3FEh, 000h, 000h,	2E4h, 000h, 000h,	disop_ds_branch
-	disasm	'TJNZ   ',	3FEh, 000h, 000h,	2E6h, 000h, 000h,	disop_ds_branch
-	disasm	'TJF    ',	3FEh, 000h, 000h,	2E8h, 000h, 000h,	disop_ds_branch
-	disasm	'TJNF   ',	3FEh, 000h, 000h,	2EAh, 000h, 000h,	disop_ds_branch
-	disasm	'TJS    ',	3FEh, 000h, 000h,	2ECh, 000h, 000h,	disop_ds_branch
-	disasm	'TJNS   ',	3FEh, 000h, 000h,	2EEh, 000h, 000h,	disop_ds_branch
-	disasm	'TJV    ',	3FEh, 000h, 000h,	2F0h, 000h, 000h,	disop_ds_branch
+	disasm	'callpa ',	3FCh, 000h, 000h,	2D0h, 000h, 000h,	disop_ls_branch
+	disasm	'callpb ',	3FCh, 000h, 000h,	2D4h, 000h, 000h,	disop_ls_branch
+	disasm	'djz    ',	3FEh, 000h, 000h,	2D8h, 000h, 000h,	disop_ds_branch
+	disasm	'djnz   ',	3FEh, 000h, 000h,	2DAh, 000h, 000h,	disop_ds_branch
+	disasm	'djf    ',	3FEh, 000h, 000h,	2DCh, 000h, 000h,	disop_ds_branch
+	disasm	'djnf   ',	3FEh, 000h, 000h,	2DEh, 000h, 000h,	disop_ds_branch
+	disasm	'ijz    ',	3FEh, 000h, 000h,	2E0h, 000h, 000h,	disop_ds_branch
+	disasm	'ijnz   ',	3FEh, 000h, 000h,	2E2h, 000h, 000h,	disop_ds_branch
+	disasm	'tjz    ',	3FEh, 000h, 000h,	2E4h, 000h, 000h,	disop_ds_branch
+	disasm	'tjnz   ',	3FEh, 000h, 000h,	2E6h, 000h, 000h,	disop_ds_branch
+	disasm	'tjf    ',	3FEh, 000h, 000h,	2E8h, 000h, 000h,	disop_ds_branch
+	disasm	'tjnf   ',	3FEh, 000h, 000h,	2EAh, 000h, 000h,	disop_ds_branch
+	disasm	'tjs    ',	3FEh, 000h, 000h,	2ECh, 000h, 000h,	disop_ds_branch
+	disasm	'tjns   ',	3FEh, 000h, 000h,	2EEh, 000h, 000h,	disop_ds_branch
+	disasm	'tjv    ',	3FEh, 000h, 000h,	2F0h, 000h, 000h,	disop_ds_branch
 
-	disasm	'JINT   ',	3FEh, 1FFh, 000h,	2F2h, 000h, 000h,	disop_s_branch
-	disasm	'JCT1   ',	3FEh, 1FFh, 000h,	2F2h, 001h, 000h,	disop_s_branch
-	disasm	'JCT2   ',	3FEh, 1FFh, 000h,	2F2h, 002h, 000h,	disop_s_branch
-	disasm	'JCT3   ',	3FEh, 1FFh, 000h,	2F2h, 003h, 000h,	disop_s_branch
-	disasm	'JSE1   ',	3FEh, 1FFh, 000h,	2F2h, 004h, 000h,	disop_s_branch
-	disasm	'JSE2   ',	3FEh, 1FFh, 000h,	2F2h, 005h, 000h,	disop_s_branch
-	disasm	'JSE3   ',	3FEh, 1FFh, 000h,	2F2h, 006h, 000h,	disop_s_branch
-	disasm	'JSE4   ',	3FEh, 1FFh, 000h,	2F2h, 007h, 000h,	disop_s_branch
-	disasm	'JPAT   ',	3FEh, 1FFh, 000h,	2F2h, 008h, 000h,	disop_s_branch
-	disasm	'JFBW   ',	3FEh, 1FFh, 000h,	2F2h, 009h, 000h,	disop_s_branch
-	disasm	'JXMT   ',	3FEh, 1FFh, 000h,	2F2h, 00Ah, 000h,	disop_s_branch
-	disasm	'JXFI   ',	3FEh, 1FFh, 000h,	2F2h, 00Bh, 000h,	disop_s_branch
-	disasm	'JXRO   ',	3FEh, 1FFh, 000h,	2F2h, 00Ch, 000h,	disop_s_branch
-	disasm	'JXRL   ',	3FEh, 1FFh, 000h,	2F2h, 00Dh, 000h,	disop_s_branch
-	disasm	'JATN   ',	3FEh, 1FFh, 000h,	2F2h, 00Eh, 000h,	disop_s_branch
-	disasm	'JQMT   ',	3FEh, 1FFh, 000h,	2F2h, 00Fh, 000h,	disop_s_branch
-	disasm	'JNINT  ',	3FEh, 1FFh, 000h,	2F2h, 010h, 000h,	disop_s_branch
-	disasm	'JNCT1  ',	3FEh, 1FFh, 000h,	2F2h, 011h, 000h,	disop_s_branch
-	disasm	'JNCT2  ',	3FEh, 1FFh, 000h,	2F2h, 012h, 000h,	disop_s_branch
-	disasm	'JNCT3  ',	3FEh, 1FFh, 000h,	2F2h, 013h, 000h,	disop_s_branch
-	disasm	'JNSE1  ',	3FEh, 1FFh, 000h,	2F2h, 014h, 000h,	disop_s_branch
-	disasm	'JNSE2  ',	3FEh, 1FFh, 000h,	2F2h, 015h, 000h,	disop_s_branch
-	disasm	'JNSE3  ',	3FEh, 1FFh, 000h,	2F2h, 016h, 000h,	disop_s_branch
-	disasm	'JNSE4  ',	3FEh, 1FFh, 000h,	2F2h, 017h, 000h,	disop_s_branch
-	disasm	'JNPAT  ',	3FEh, 1FFh, 000h,	2F2h, 018h, 000h,	disop_s_branch
-	disasm	'JNFBW  ',	3FEh, 1FFh, 000h,	2F2h, 019h, 000h,	disop_s_branch
-	disasm	'JNXMT  ',	3FEh, 1FFh, 000h,	2F2h, 01Ah, 000h,	disop_s_branch
-	disasm	'JNXFI  ',	3FEh, 1FFh, 000h,	2F2h, 01Bh, 000h,	disop_s_branch
-	disasm	'JNXRO  ',	3FEh, 1FFh, 000h,	2F2h, 01Ch, 000h,	disop_s_branch
-	disasm	'JNXRL  ',	3FEh, 1FFh, 000h,	2F2h, 01Dh, 000h,	disop_s_branch
-	disasm	'JNATN  ',	3FEh, 1FFh, 000h,	2F2h, 01Eh, 000h,	disop_s_branch
-	disasm	'JNQMT  ',	3FEh, 1FFh, 000h,	2F2h, 01Fh, 000h,	disop_s_branch
+	disasm	'jint   ',	3FEh, 1FFh, 000h,	2F2h, 000h, 000h,	disop_s_branch
+	disasm	'jct1   ',	3FEh, 1FFh, 000h,	2F2h, 001h, 000h,	disop_s_branch
+	disasm	'jct2   ',	3FEh, 1FFh, 000h,	2F2h, 002h, 000h,	disop_s_branch
+	disasm	'jct3   ',	3FEh, 1FFh, 000h,	2F2h, 003h, 000h,	disop_s_branch
+	disasm	'jse1   ',	3FEh, 1FFh, 000h,	2F2h, 004h, 000h,	disop_s_branch
+	disasm	'jse2   ',	3FEh, 1FFh, 000h,	2F2h, 005h, 000h,	disop_s_branch
+	disasm	'jse3   ',	3FEh, 1FFh, 000h,	2F2h, 006h, 000h,	disop_s_branch
+	disasm	'jse4   ',	3FEh, 1FFh, 000h,	2F2h, 007h, 000h,	disop_s_branch
+	disasm	'jpat   ',	3FEh, 1FFh, 000h,	2F2h, 008h, 000h,	disop_s_branch
+	disasm	'jfbw   ',	3FEh, 1FFh, 000h,	2F2h, 009h, 000h,	disop_s_branch
+	disasm	'jxmt   ',	3FEh, 1FFh, 000h,	2F2h, 00Ah, 000h,	disop_s_branch
+	disasm	'jxfi   ',	3FEh, 1FFh, 000h,	2F2h, 00Bh, 000h,	disop_s_branch
+	disasm	'jxro   ',	3FEh, 1FFh, 000h,	2F2h, 00Ch, 000h,	disop_s_branch
+	disasm	'jxrl   ',	3FEh, 1FFh, 000h,	2F2h, 00Dh, 000h,	disop_s_branch
+	disasm	'jatn   ',	3FEh, 1FFh, 000h,	2F2h, 00Eh, 000h,	disop_s_branch
+	disasm	'jqmt   ',	3FEh, 1FFh, 000h,	2F2h, 00Fh, 000h,	disop_s_branch
+	disasm	'jnint  ',	3FEh, 1FFh, 000h,	2F2h, 010h, 000h,	disop_s_branch
+	disasm	'jnct1  ',	3FEh, 1FFh, 000h,	2F2h, 011h, 000h,	disop_s_branch
+	disasm	'jnct2  ',	3FEh, 1FFh, 000h,	2F2h, 012h, 000h,	disop_s_branch
+	disasm	'jnct3  ',	3FEh, 1FFh, 000h,	2F2h, 013h, 000h,	disop_s_branch
+	disasm	'jnse1  ',	3FEh, 1FFh, 000h,	2F2h, 014h, 000h,	disop_s_branch
+	disasm	'jnse2  ',	3FEh, 1FFh, 000h,	2F2h, 015h, 000h,	disop_s_branch
+	disasm	'jnse3  ',	3FEh, 1FFh, 000h,	2F2h, 016h, 000h,	disop_s_branch
+	disasm	'jnse4  ',	3FEh, 1FFh, 000h,	2F2h, 017h, 000h,	disop_s_branch
+	disasm	'jnpat  ',	3FEh, 1FFh, 000h,	2F2h, 018h, 000h,	disop_s_branch
+	disasm	'jnfbw  ',	3FEh, 1FFh, 000h,	2F2h, 019h, 000h,	disop_s_branch
+	disasm	'jnxmt  ',	3FEh, 1FFh, 000h,	2F2h, 01Ah, 000h,	disop_s_branch
+	disasm	'jnxfi  ',	3FEh, 1FFh, 000h,	2F2h, 01Bh, 000h,	disop_s_branch
+	disasm	'jnxro  ',	3FEh, 1FFh, 000h,	2F2h, 01Ch, 000h,	disop_s_branch
+	disasm	'jnxrl  ',	3FEh, 1FFh, 000h,	2F2h, 01Dh, 000h,	disop_s_branch
+	disasm	'jnatn  ',	3FEh, 1FFh, 000h,	2F2h, 01Eh, 000h,	disop_s_branch
+	disasm	'jnqmt  ',	3FEh, 1FFh, 000h,	2F2h, 01Fh, 000h,	disop_s_branch
 
-	disasm	'SETPAT ',	3FCh, 000h, 000h,	2FCh, 000h, 000h,	disop_ls
-	disasm	'WRPIN  ',	3FCh, 000h, 000h,	300h, 000h, 000h,	disop_ls_pin
-	disasm	'AKPIN  ',	3FEh, 1FFh, 000h,	302h, 001h, 000h,	disop_s_pin
-	disasm	'WXPIN  ',	3FCh, 000h, 000h,	304h, 000h, 000h,	disop_ls_pin
-	disasm	'WYPIN  ',	3FCh, 000h, 000h,	308h, 000h, 000h,	disop_ls_pin
-	disasm	'WRLUT  ',	3FCh, 000h, 000h,	30Ch, 000h, 000h,	disop_ls_ptr
-	disasm	'WRBYTE ',	3FCh, 000h, 000h,	310h, 000h, 000h,	disop_ls_ptr
-	disasm	'WRWORD ',	3FCh, 000h, 000h,	314h, 000h, 000h,	disop_ls_ptr
-	disasm	'PUSHA  ',	3FDh, 000h, 1FFh,	319h, 000h, 161h,	disop_lx
-	disasm	'PUSHB  ',	3FDh, 000h, 1FFh,	319h, 000h, 1E1h,	disop_lx
-	disasm	'WRLONG ',	3FCh, 000h, 000h,	318h, 000h, 000h,	disop_ls_ptr
-	disasm	'RDFAST ',	3FCh, 000h, 000h,	31Ch, 000h, 000h,	disop_ls
-	disasm	'WRFAST ',	3FCh, 000h, 000h,	320h, 000h, 000h,	disop_ls
-	disasm	'FBLOCK ',	3FCh, 000h, 000h,	324h, 000h, 000h,	disop_ls
-	disasm	'XINIT  ',	3FCh, 000h, 000h,	328h, 000h, 000h,	disop_ls
-	disasm	'XSTOP  ',	3FFh, 1FFh, 1FFh,	32Bh, 000h, 000h,	disop_none
-	disasm	'XZERO  ',	3FCh, 000h, 000h,	32Ch, 000h, 000h,	disop_ls
-	disasm	'XCONT  ',	3FCh, 000h, 000h,	330h, 000h, 000h,	disop_ls
-	disasm	'REP    ',	3FCh, 000h, 000h,	334h, 000h, 000h,	disop_ls
-	disasm	'COGINIT',	3F8h, 000h, 000h,	338h, 000h, 000h,	disop_lsc
-	disasm	'QMUL   ',	3FCh, 000h, 000h,	340h, 000h, 000h,	disop_ls
-	disasm	'QDIV   ',	3FCh, 000h, 000h,	344h, 000h, 000h,	disop_ls
-	disasm	'QFRAC  ',	3FCh, 000h, 000h,	348h, 000h, 000h,	disop_ls
-	disasm	'QSQRT  ',	3FCh, 000h, 000h,	34Ch, 000h, 000h,	disop_ls
-	disasm	'QROTATE',	3FCh, 000h, 000h,	350h, 000h, 000h,	disop_ls
-	disasm	'QVECTOR',	3FCh, 000h, 000h,	354h, 000h, 000h,	disop_ls
+	disasm	'setpat ',	3FCh, 000h, 000h,	2FCh, 000h, 000h,	disop_ls
+	disasm	'wrpin  ',	3FCh, 000h, 000h,	300h, 000h, 000h,	disop_ls_pin
+	disasm	'akpin  ',	3FEh, 1FFh, 000h,	302h, 001h, 000h,	disop_s_pin
+	disasm	'wxpin  ',	3FCh, 000h, 000h,	304h, 000h, 000h,	disop_ls_pin
+	disasm	'wypin  ',	3FCh, 000h, 000h,	308h, 000h, 000h,	disop_ls_pin
+	disasm	'wrlut  ',	3FCh, 000h, 000h,	30Ch, 000h, 000h,	disop_ls_ptr
+	disasm	'wrbyte ',	3FCh, 000h, 000h,	310h, 000h, 000h,	disop_ls_ptr
+	disasm	'wrword ',	3FCh, 000h, 000h,	314h, 000h, 000h,	disop_ls_ptr
+	disasm	'pusha  ',	3FDh, 000h, 1FFh,	319h, 000h, 161h,	disop_lx
+	disasm	'pushb  ',	3FDh, 000h, 1FFh,	319h, 000h, 1E1h,	disop_lx
+	disasm	'wrlong ',	3FCh, 000h, 000h,	318h, 000h, 000h,	disop_ls_ptr
+	disasm	'rdfast ',	3FCh, 000h, 000h,	31Ch, 000h, 000h,	disop_ls
+	disasm	'wrfast ',	3FCh, 000h, 000h,	320h, 000h, 000h,	disop_ls
+	disasm	'fblock ',	3FCh, 000h, 000h,	324h, 000h, 000h,	disop_ls
+	disasm	'xinit  ',	3FCh, 000h, 000h,	328h, 000h, 000h,	disop_ls
+	disasm	'xstop  ',	3FFh, 1FFh, 1FFh,	32Bh, 000h, 000h,	disop_none
+	disasm	'xzero  ',	3FCh, 000h, 000h,	32Ch, 000h, 000h,	disop_ls
+	disasm	'xcont  ',	3FCh, 000h, 000h,	330h, 000h, 000h,	disop_ls
+	disasm	'rep    ',	3FCh, 000h, 000h,	334h, 000h, 000h,	disop_ls
+	disasm	'coginit',	3F8h, 000h, 000h,	338h, 000h, 000h,	disop_lsc
+	disasm	'qmul   ',	3FCh, 000h, 000h,	340h, 000h, 000h,	disop_ls
+	disasm	'qdiv   ',	3FCh, 000h, 000h,	344h, 000h, 000h,	disop_ls
+	disasm	'qfrac  ',	3FCh, 000h, 000h,	348h, 000h, 000h,	disop_ls
+	disasm	'qsqrt  ',	3FCh, 000h, 000h,	34Ch, 000h, 000h,	disop_ls
+	disasm	'qrotate',	3FCh, 000h, 000h,	350h, 000h, 000h,	disop_ls
+	disasm	'qvector',	3FCh, 000h, 000h,	354h, 000h, 000h,	disop_ls
 
-	disasm	'HUBSET ',	3FEh, 000h, 1FFh,	358h, 000h, 000h,	disop_l
-	disasm	'COGID  ',	3FAh, 000h, 1FFh,	358h, 000h, 001h,	disop_lc
-	disasm	'COGSTOP',	3FEh, 000h, 1FFh,	358h, 000h, 003h,	disop_l
-	disasm	'LOCKNEW',	3FBh, 000h, 1FFh,	358h, 000h, 004h,	disop_dc
-	disasm	'LOCKRET',	3FEh, 000h, 1FFh,	358h, 000h, 005h,	disop_l
-	disasm	'LOCKTRY',	3FAh, 000h, 1FFh,	358h, 000h, 006h,	disop_lc
-	disasm	'LOCKREL',	3FAh, 000h, 1FFh,	358h, 000h, 007h,	disop_lc
-	disasm	'QLOG   ',	3FEh, 000h, 1FFh,	358h, 000h, 00Eh,	disop_l
-	disasm	'QEXP   ',	3FEh, 000h, 1FFh,	358h, 000h, 00Fh,	disop_l
-	disasm	'RFBYTE ',	3F9h, 000h, 1FFh,	358h, 000h, 010h,	disop_dcz
-	disasm	'RFWORD ',	3F9h, 000h, 1FFh,	358h, 000h, 011h,	disop_dcz
-	disasm	'RFLONG ',	3F9h, 000h, 1FFh,	358h, 000h, 012h,	disop_dcz
-	disasm	'RFVAR  ',	3F9h, 000h, 1FFh,	358h, 000h, 013h,	disop_dcz
-	disasm	'RFVARS ',	3F9h, 000h, 1FFh,	358h, 000h, 014h,	disop_dcz
+	disasm	'hubset ',	3FEh, 000h, 1FFh,	358h, 000h, 000h,	disop_l
+	disasm	'cogid  ',	3FAh, 000h, 1FFh,	358h, 000h, 001h,	disop_lc
+	disasm	'cogstop',	3FEh, 000h, 1FFh,	358h, 000h, 003h,	disop_l
+	disasm	'locknew',	3FBh, 000h, 1FFh,	358h, 000h, 004h,	disop_dc
+	disasm	'lockret',	3FEh, 000h, 1FFh,	358h, 000h, 005h,	disop_l
+	disasm	'locktry',	3FAh, 000h, 1FFh,	358h, 000h, 006h,	disop_lc
+	disasm	'lockrel',	3FAh, 000h, 1FFh,	358h, 000h, 007h,	disop_lc
+	disasm	'qlog   ',	3FEh, 000h, 1FFh,	358h, 000h, 00Eh,	disop_l
+	disasm	'qexp   ',	3FEh, 000h, 1FFh,	358h, 000h, 00Fh,	disop_l
+	disasm	'rfbyte ',	3F9h, 000h, 1FFh,	358h, 000h, 010h,	disop_dcz
+	disasm	'rfword ',	3F9h, 000h, 1FFh,	358h, 000h, 011h,	disop_dcz
+	disasm	'rflong ',	3F9h, 000h, 1FFh,	358h, 000h, 012h,	disop_dcz
+	disasm	'rfvar  ',	3F9h, 000h, 1FFh,	358h, 000h, 013h,	disop_dcz
+	disasm	'rfvars ',	3F9h, 000h, 1FFh,	358h, 000h, 014h,	disop_dcz
 
-	disasm	'WFBYTE ',	3FEh, 000h, 1FFh,	358h, 000h, 015h,	disop_l
-	disasm	'WFWORD ',	3FEh, 000h, 1FFh,	358h, 000h, 016h,	disop_l
-	disasm	'WFLONG ',	3FEh, 000h, 1FFh,	358h, 000h, 017h,	disop_l
-	disasm	'GETQX  ',	3F9h, 000h, 1FFh,	358h, 000h, 018h,	disop_dcz
-	disasm	'GETQY  ',	3F9h, 000h, 1FFh,	358h, 000h, 019h,	disop_dcz
-	disasm	'GETCT  ',	3FBh, 000h, 1FFh,	358h, 000h, 01Ah,	disop_dc
-	disasm	'GETRND ',	3F9h, 000h, 1FFh,	358h, 000h, 01Bh,	disop_dcz
-	disasm	'GETRND ',	3F9h, 1FFh, 1FFh,	359h, 000h, 01Bh,	disop_cz
-	disasm	'SETDACS',	3FEh, 000h, 1FFh,	358h, 000h, 01Ch,	disop_l
-	disasm	'SETXFRQ',	3FEh, 000h, 1FFh,	358h, 000h, 01Dh,	disop_l
-	disasm	'GETXACC',	3FFh, 000h, 1FFh,	358h, 000h, 01Eh,	disop_d
-	disasm	'WAITX  ',	3F8h, 000h, 1FFh,	358h, 000h, 01Fh,	disop_lcz
-	disasm	'SETSE1 ',	3FEh, 000h, 1FFh,	358h, 000h, 020h,	disop_l
-	disasm	'SETSE2 ',	3FEh, 000h, 1FFh,	358h, 000h, 021h,	disop_l
-	disasm	'SETSE3 ',	3FEh, 000h, 1FFh,	358h, 000h, 022h,	disop_l
-	disasm	'SETSE4 ',	3FEh, 000h, 1FFh,	358h, 000h, 023h,	disop_l
+	disasm	'wfbyte ',	3FEh, 000h, 1FFh,	358h, 000h, 015h,	disop_l
+	disasm	'wfword ',	3FEh, 000h, 1FFh,	358h, 000h, 016h,	disop_l
+	disasm	'wflong ',	3FEh, 000h, 1FFh,	358h, 000h, 017h,	disop_l
+	disasm	'getqx  ',	3F9h, 000h, 1FFh,	358h, 000h, 018h,	disop_dcz
+	disasm	'getqy  ',	3F9h, 000h, 1FFh,	358h, 000h, 019h,	disop_dcz
+	disasm	'getct  ',	3FBh, 000h, 1FFh,	358h, 000h, 01Ah,	disop_dc
+	disasm	'getrnd ',	3F9h, 000h, 1FFh,	358h, 000h, 01Bh,	disop_dcz
+	disasm	'getrnd ',	3F9h, 1FFh, 1FFh,	359h, 000h, 01Bh,	disop_cz
+	disasm	'setdacs',	3FEh, 000h, 1FFh,	358h, 000h, 01Ch,	disop_l
+	disasm	'setxfrq',	3FEh, 000h, 1FFh,	358h, 000h, 01Dh,	disop_l
+	disasm	'getxacc',	3FFh, 000h, 1FFh,	358h, 000h, 01Eh,	disop_d
+	disasm	'waitx  ',	3F8h, 000h, 1FFh,	358h, 000h, 01Fh,	disop_lcz
+	disasm	'setse1 ',	3FEh, 000h, 1FFh,	358h, 000h, 020h,	disop_l
+	disasm	'setse2 ',	3FEh, 000h, 1FFh,	358h, 000h, 021h,	disop_l
+	disasm	'setse3 ',	3FEh, 000h, 1FFh,	358h, 000h, 022h,	disop_l
+	disasm	'setse4 ',	3FEh, 000h, 1FFh,	358h, 000h, 023h,	disop_l
 
-	disasm	'POLLINT',	3F9h, 1FFh, 1FFh,	358h, 000h, 024h,	disop_cz
-	disasm	'POLLCT1',	3F9h, 1FFh, 1FFh,	358h, 001h, 024h,	disop_cz
-	disasm	'POLLCT2',	3F9h, 1FFh, 1FFh,	358h, 002h, 024h,	disop_cz
-	disasm	'POLLCT3',	3F9h, 1FFh, 1FFh,	358h, 003h, 024h,	disop_cz
-	disasm	'POLLSE1',	3F9h, 1FFh, 1FFh,	358h, 004h, 024h,	disop_cz
-	disasm	'POLLSE2',	3F9h, 1FFh, 1FFh,	358h, 005h, 024h,	disop_cz
-	disasm	'POLLSE3',	3F9h, 1FFh, 1FFh,	358h, 006h, 024h,	disop_cz
-	disasm	'POLLSE4',	3F9h, 1FFh, 1FFh,	358h, 007h, 024h,	disop_cz
-	disasm	'POLLPAT',	3F9h, 1FFh, 1FFh,	358h, 008h, 024h,	disop_cz
-	disasm	'POLLFBW',	3F9h, 1FFh, 1FFh,	358h, 009h, 024h,	disop_cz
-	disasm	'POLLXMT',	3F9h, 1FFh, 1FFh,	358h, 00Ah, 024h,	disop_cz
-	disasm	'POLLXFI',	3F9h, 1FFh, 1FFh,	358h, 00Bh, 024h,	disop_cz
-	disasm	'POLLXRO',	3F9h, 1FFh, 1FFh,	358h, 00Ch, 024h,	disop_cz
-	disasm	'POLLXRL',	3F9h, 1FFh, 1FFh,	358h, 00Dh, 024h,	disop_cz
-	disasm	'POLLATN',	3F9h, 1FFh, 1FFh,	358h, 00Eh, 024h,	disop_cz
-	disasm	'POLLQMT',	3F9h, 1FFh, 1FFh,	358h, 00Fh, 024h,	disop_cz
-	disasm	'WAITINT',	3F9h, 1FFh, 1FFh,	358h, 010h, 024h,	disop_cz
-	disasm	'WAITCT1',	3F9h, 1FFh, 1FFh,	358h, 011h, 024h,	disop_cz
-	disasm	'WAITCT2',	3F9h, 1FFh, 1FFh,	358h, 012h, 024h,	disop_cz
-	disasm	'WAITCT3',	3F9h, 1FFh, 1FFh,	358h, 013h, 024h,	disop_cz
-	disasm	'WAITSE1',	3F9h, 1FFh, 1FFh,	358h, 014h, 024h,	disop_cz
-	disasm	'WAITSE2',	3F9h, 1FFh, 1FFh,	358h, 015h, 024h,	disop_cz
-	disasm	'WAITSE3',	3F9h, 1FFh, 1FFh,	358h, 016h, 024h,	disop_cz
-	disasm	'WAITSE4',	3F9h, 1FFh, 1FFh,	358h, 017h, 024h,	disop_cz
-	disasm	'WAITPAT',	3F9h, 1FFh, 1FFh,	358h, 018h, 024h,	disop_cz
-	disasm	'WAITFBW',	3F9h, 1FFh, 1FFh,	358h, 019h, 024h,	disop_cz
-	disasm	'WAITXMT',	3F9h, 1FFh, 1FFh,	358h, 01Ah, 024h,	disop_cz
-	disasm	'WAITXFI',	3F9h, 1FFh, 1FFh,	358h, 01Bh, 024h,	disop_cz
-	disasm	'WAITXRO',	3F9h, 1FFh, 1FFh,	358h, 01Ch, 024h,	disop_cz
-	disasm	'WAITXRL',	3F9h, 1FFh, 1FFh,	358h, 01Dh, 024h,	disop_cz
-	disasm	'WAITATN',	3F9h, 1FFh, 1FFh,	358h, 01Eh, 024h,	disop_cz
+	disasm	'pollint',	3F9h, 1FFh, 1FFh,	358h, 000h, 024h,	disop_cz
+	disasm	'pollct1',	3F9h, 1FFh, 1FFh,	358h, 001h, 024h,	disop_cz
+	disasm	'pollct2',	3F9h, 1FFh, 1FFh,	358h, 002h, 024h,	disop_cz
+	disasm	'pollct3',	3F9h, 1FFh, 1FFh,	358h, 003h, 024h,	disop_cz
+	disasm	'pollse1',	3F9h, 1FFh, 1FFh,	358h, 004h, 024h,	disop_cz
+	disasm	'pollse2',	3F9h, 1FFh, 1FFh,	358h, 005h, 024h,	disop_cz
+	disasm	'pollse3',	3F9h, 1FFh, 1FFh,	358h, 006h, 024h,	disop_cz
+	disasm	'pollse4',	3F9h, 1FFh, 1FFh,	358h, 007h, 024h,	disop_cz
+	disasm	'pollpat',	3F9h, 1FFh, 1FFh,	358h, 008h, 024h,	disop_cz
+	disasm	'pollfbw',	3F9h, 1FFh, 1FFh,	358h, 009h, 024h,	disop_cz
+	disasm	'pollxmt',	3F9h, 1FFh, 1FFh,	358h, 00Ah, 024h,	disop_cz
+	disasm	'pollxfi',	3F9h, 1FFh, 1FFh,	358h, 00Bh, 024h,	disop_cz
+	disasm	'pollxro',	3F9h, 1FFh, 1FFh,	358h, 00Ch, 024h,	disop_cz
+	disasm	'pollxrl',	3F9h, 1FFh, 1FFh,	358h, 00Dh, 024h,	disop_cz
+	disasm	'pollatn',	3F9h, 1FFh, 1FFh,	358h, 00Eh, 024h,	disop_cz
+	disasm	'pollqmt',	3F9h, 1FFh, 1FFh,	358h, 00Fh, 024h,	disop_cz
+	disasm	'waitint',	3F9h, 1FFh, 1FFh,	358h, 010h, 024h,	disop_cz
+	disasm	'waitct1',	3F9h, 1FFh, 1FFh,	358h, 011h, 024h,	disop_cz
+	disasm	'waitct2',	3F9h, 1FFh, 1FFh,	358h, 012h, 024h,	disop_cz
+	disasm	'waitct3',	3F9h, 1FFh, 1FFh,	358h, 013h, 024h,	disop_cz
+	disasm	'waitse1',	3F9h, 1FFh, 1FFh,	358h, 014h, 024h,	disop_cz
+	disasm	'waitse2',	3F9h, 1FFh, 1FFh,	358h, 015h, 024h,	disop_cz
+	disasm	'waitse3',	3F9h, 1FFh, 1FFh,	358h, 016h, 024h,	disop_cz
+	disasm	'waitse4',	3F9h, 1FFh, 1FFh,	358h, 017h, 024h,	disop_cz
+	disasm	'waitpat',	3F9h, 1FFh, 1FFh,	358h, 018h, 024h,	disop_cz
+	disasm	'waitfbw',	3F9h, 1FFh, 1FFh,	358h, 019h, 024h,	disop_cz
+	disasm	'waitxmt',	3F9h, 1FFh, 1FFh,	358h, 01Ah, 024h,	disop_cz
+	disasm	'waitxfi',	3F9h, 1FFh, 1FFh,	358h, 01Bh, 024h,	disop_cz
+	disasm	'waitxro',	3F9h, 1FFh, 1FFh,	358h, 01Ch, 024h,	disop_cz
+	disasm	'waitxrl',	3F9h, 1FFh, 1FFh,	358h, 01Dh, 024h,	disop_cz
+	disasm	'waitatn',	3F9h, 1FFh, 1FFh,	358h, 01Eh, 024h,	disop_cz
 
-	disasm	'ALLOWI ',	3FFh, 1FFh, 1FFh,	358h, 020h, 024h,	disop_none
-	disasm	'STALLI ',	3FFh, 1FFh, 1FFh,	358h, 021h, 024h,	disop_none
-	disasm	'TRGINT1',	3FFh, 1FFh, 1FFh,	358h, 022h, 024h,	disop_none
-	disasm	'TRGINT2',	3FFh, 1FFh, 1FFh,	358h, 023h, 024h,	disop_none
-	disasm	'TRGINT3',	3FFh, 1FFh, 1FFh,	358h, 024h, 024h,	disop_none
-	disasm	'NIXINT1',	3FFh, 1FFh, 1FFh,	358h, 025h, 024h,	disop_none
-	disasm	'NIXINT2',	3FFh, 1FFh, 1FFh,	358h, 026h, 024h,	disop_none
-	disasm	'NIXINT3',	3FFh, 1FFh, 1FFh,	358h, 027h, 024h,	disop_none
+	disasm	'allowi ',	3FFh, 1FFh, 1FFh,	358h, 020h, 024h,	disop_none
+	disasm	'stalli ',	3FFh, 1FFh, 1FFh,	358h, 021h, 024h,	disop_none
+	disasm	'trgint1',	3FFh, 1FFh, 1FFh,	358h, 022h, 024h,	disop_none
+	disasm	'trgint2',	3FFh, 1FFh, 1FFh,	358h, 023h, 024h,	disop_none
+	disasm	'trgint3',	3FFh, 1FFh, 1FFh,	358h, 024h, 024h,	disop_none
+	disasm	'nixint1',	3FFh, 1FFh, 1FFh,	358h, 025h, 024h,	disop_none
+	disasm	'nixint2',	3FFh, 1FFh, 1FFh,	358h, 026h, 024h,	disop_none
+	disasm	'nixint3',	3FFh, 1FFh, 1FFh,	358h, 027h, 024h,	disop_none
 
-	disasm	'SETINT1',	3FEh, 000h, 1FFh,	358h, 000h, 025h,	disop_l
-	disasm	'SETINT2',	3FEh, 000h, 1FFh,	358h, 000h, 026h,	disop_l
-	disasm	'SETINT3',	3FEh, 000h, 1FFh,	358h, 000h, 027h,	disop_l
-	disasm	'SETQ   ',	3FEh, 000h, 1FFh,	358h, 000h, 028h,	disop_l
-	disasm	'SETQ2  ',	3FEh, 000h, 1FFh,	358h, 000h, 029h,	disop_l
-	disasm	'PUSH   ',	3FEh, 000h, 1FFh,	358h, 000h, 02Ah,	disop_l
-	disasm	'POP    ',	3F9h, 000h, 1FFh,	358h, 000h, 02Bh,	disop_dcz
-	disasm	'JMP    ',	3F9h, 000h, 1FFh,	358h, 000h, 02Ch,	disop_dcz
-	disasm	'CALL   ',	3F9h, 000h, 1FFh,	358h, 000h, 02Dh,	disop_dcz
-	disasm	'RET    ',	3F9h, 000h, 1FFh,	359h, 000h, 02Dh,	disop_cz
-	disasm	'CALLA  ',	3F9h, 000h, 1FFh,	358h, 000h, 02Eh,	disop_dcz
-	disasm	'RETA   ',	3F9h, 000h, 1FFh,	359h, 000h, 02Eh,	disop_cz
-	disasm	'CALLB  ',	3F9h, 000h, 1FFh,	358h, 000h, 02Fh,	disop_dcz
-	disasm	'RETB   ',	3F9h, 000h, 1FFh,	359h, 000h, 02Fh,	disop_cz
+	disasm	'setint1',	3FEh, 000h, 1FFh,	358h, 000h, 025h,	disop_l
+	disasm	'setint2',	3FEh, 000h, 1FFh,	358h, 000h, 026h,	disop_l
+	disasm	'setint3',	3FEh, 000h, 1FFh,	358h, 000h, 027h,	disop_l
+	disasm	'setq   ',	3FEh, 000h, 1FFh,	358h, 000h, 028h,	disop_l
+	disasm	'setq2  ',	3FEh, 000h, 1FFh,	358h, 000h, 029h,	disop_l
+	disasm	'push   ',	3FEh, 000h, 1FFh,	358h, 000h, 02Ah,	disop_l
+	disasm	'pop    ',	3F9h, 000h, 1FFh,	358h, 000h, 02Bh,	disop_dcz
+	disasm	'jmp    ',	3F9h, 000h, 1FFh,	358h, 000h, 02Ch,	disop_dcz
+	disasm	'call   ',	3F9h, 000h, 1FFh,	358h, 000h, 02Dh,	disop_dcz
+	disasm	'ret    ',	3F9h, 000h, 1FFh,	359h, 000h, 02Dh,	disop_cz
+	disasm	'calla  ',	3F9h, 000h, 1FFh,	358h, 000h, 02Eh,	disop_dcz
+	disasm	'reta   ',	3F9h, 000h, 1FFh,	359h, 000h, 02Eh,	disop_cz
+	disasm	'callb  ',	3F9h, 000h, 1FFh,	358h, 000h, 02Fh,	disop_dcz
+	disasm	'retb   ',	3F9h, 000h, 1FFh,	359h, 000h, 02Fh,	disop_cz
 
-	disasm	'JMPREL ',	3FEh, 000h, 1FFh,	358h, 000h, 030h,	disop_l
-	disasm	'SKIP   ',	3FEh, 000h, 1FFh,	358h, 000h, 031h,	disop_l
-	disasm	'SKIPF  ',	3FEh, 000h, 1FFh,	358h, 000h, 032h,	disop_l
-	disasm	'EXECF  ',	3FEh, 000h, 1FFh,	358h, 000h, 033h,	disop_l
-	disasm	'GETPTR ',	3FFh, 000h, 1FFh,	358h, 000h, 034h,	disop_d
+	disasm	'jmprel ',	3FEh, 000h, 1FFh,	358h, 000h, 030h,	disop_l
+	disasm	'skip   ',	3FEh, 000h, 1FFh,	358h, 000h, 031h,	disop_l
+	disasm	'skipf  ',	3FEh, 000h, 1FFh,	358h, 000h, 032h,	disop_l
+	disasm	'execf  ',	3FEh, 000h, 1FFh,	358h, 000h, 033h,	disop_l
+	disasm	'getptr ',	3FFh, 000h, 1FFh,	358h, 000h, 034h,	disop_d
 
-	disasm	'COGBRK ',	3FEh, 000h, 1FFh,	358h, 000h, 035h,	disop_l
-	disasm	'GETBRK ',	3FAh, 000h, 1FFh,	35Ah, 000h, 035h,	disop_dcz
-	disasm	'GETBRK ',	3FCh, 000h, 1FFh,	35Ch, 000h, 035h,	disop_dcz
+	disasm	'cogbrk ',	3FEh, 000h, 1FFh,	358h, 000h, 035h,	disop_l
+	disasm	'getbrk ',	3FAh, 000h, 1FFh,	35Ah, 000h, 035h,	disop_dcz
+	disasm	'getbrk ',	3FCh, 000h, 1FFh,	35Ch, 000h, 035h,	disop_dcz
 
-	disasm	'BRK    ',	3FEh, 000h, 1FFh,	358h, 000h, 036h,	disop_l
-	disasm	'SETLUTS',	3FEh, 000h, 1FFh,	358h, 000h, 037h,	disop_l
-	disasm	'SETCY  ',	3FEh, 000h, 1FFh,	358h, 000h, 038h,	disop_l
-	disasm	'SETCI  ',	3FEh, 000h, 1FFh,	358h, 000h, 039h,	disop_l
-	disasm	'SETCQ  ',	3FEh, 000h, 1FFh,	358h, 000h, 03Ah,	disop_l
-	disasm	'SETCFRQ',	3FEh, 000h, 1FFh,	358h, 000h, 03Bh,	disop_l
-	disasm	'SETCMOD',	3FEh, 000h, 1FFh,	358h, 000h, 03Ch,	disop_l
-	disasm	'SETPIV ',	3FEh, 000h, 1FFh,	358h, 000h, 03Dh,	disop_l
-	disasm	'SETPIX ',	3FEh, 000h, 1FFh,	358h, 000h, 03Eh,	disop_l
-	disasm	'COGATN ',	3FEh, 000h, 1FFh,	358h, 000h, 03Fh,	disop_l
+	disasm	'brk    ',	3FEh, 000h, 1FFh,	358h, 000h, 036h,	disop_l
+	disasm	'setluts',	3FEh, 000h, 1FFh,	358h, 000h, 037h,	disop_l
+	disasm	'setcy  ',	3FEh, 000h, 1FFh,	358h, 000h, 038h,	disop_l
+	disasm	'setci  ',	3FEh, 000h, 1FFh,	358h, 000h, 039h,	disop_l
+	disasm	'setcq  ',	3FEh, 000h, 1FFh,	358h, 000h, 03Ah,	disop_l
+	disasm	'setcfrq',	3FEh, 000h, 1FFh,	358h, 000h, 03Bh,	disop_l
+	disasm	'setcmod',	3FEh, 000h, 1FFh,	358h, 000h, 03Ch,	disop_l
+	disasm	'setpiv ',	3FEh, 000h, 1FFh,	358h, 000h, 03Dh,	disop_l
+	disasm	'setpix ',	3FEh, 000h, 1FFh,	358h, 000h, 03Eh,	disop_l
+	disasm	'cogatn ',	3FEh, 000h, 1FFh,	358h, 000h, 03Fh,	disop_l
 
-	disasm	'TESTP  ',	3FEh, 000h, 1E1h,	35Ah, 000h, 040h,	disop_lcz_pin_log
-	disasm	'TESTPN ',	3FEh, 000h, 1E1h,	35Ch, 000h, 041h,	disop_lcz_pin_log
+	disasm	'testp  ',	3FEh, 000h, 1E1h,	35Ah, 000h, 040h,	disop_lcz_pin_log
+	disasm	'testp  ',	3FEh, 000h, 1E1h,	35Ch, 000h, 040h,	disop_lcz_pin_log
+	disasm	'testpn ',	3FEh, 000h, 1E1h,	35Ah, 000h, 041h,	disop_lcz_pin_log
+	disasm	'testpn ',	3FEh, 000h, 1E1h,	35Ch, 000h, 041h,	disop_lcz_pin_log
 
-	disasm	'DIRL   ',	3F8h, 000h, 1FFh,	358h, 000h, 040h,	disop_lcz_pin
-	disasm	'DIRH   ',	3F8h, 000h, 1FFh,	358h, 000h, 041h,	disop_lcz_pin
-	disasm	'DIRC   ',	3F8h, 000h, 1FFh,	358h, 000h, 042h,	disop_lcz_pin
-	disasm	'DIRNC  ',	3F8h, 000h, 1FFh,	358h, 000h, 043h,	disop_lcz_pin
-	disasm	'DIRZ   ',	3F8h, 000h, 1FFh,	358h, 000h, 044h,	disop_lcz_pin
-	disasm	'DIRNZ  ',	3F8h, 000h, 1FFh,	358h, 000h, 045h,	disop_lcz_pin
-	disasm	'DIRRND ',	3F8h, 000h, 1FFh,	358h, 000h, 046h,	disop_lcz_pin
-	disasm	'DIRNOT ',	3F8h, 000h, 1FFh,	358h, 000h, 047h,	disop_lcz_pin
-	disasm	'OUTL   ',	3F8h, 000h, 1FFh,	358h, 000h, 048h,	disop_lcz_pin
-	disasm	'OUTH   ',	3F8h, 000h, 1FFh,	358h, 000h, 049h,	disop_lcz_pin
-	disasm	'OUTC   ',	3F8h, 000h, 1FFh,	358h, 000h, 04Ah,	disop_lcz_pin
-	disasm	'OUTNC  ',	3F8h, 000h, 1FFh,	358h, 000h, 04Bh,	disop_lcz_pin
-	disasm	'OUTZ   ',	3F8h, 000h, 1FFh,	358h, 000h, 04Ch,	disop_lcz_pin
-	disasm	'OUTNZ  ',	3F8h, 000h, 1FFh,	358h, 000h, 04Dh,	disop_lcz_pin
-	disasm	'OUTRND ',	3F8h, 000h, 1FFh,	358h, 000h, 04Eh,	disop_lcz_pin
-	disasm	'OUTNOT ',	3F8h, 000h, 1FFh,	358h, 000h, 04Fh,	disop_lcz_pin
-	disasm	'FLTL   ',	3F8h, 000h, 1FFh,	358h, 000h, 050h,	disop_lcz_pin
-	disasm	'FLTH   ',	3F8h, 000h, 1FFh,	358h, 000h, 051h,	disop_lcz_pin
-	disasm	'FLTC   ',	3F8h, 000h, 1FFh,	358h, 000h, 052h,	disop_lcz_pin
-	disasm	'FLTNC  ',	3F8h, 000h, 1FFh,	358h, 000h, 053h,	disop_lcz_pin
-	disasm	'FLTZ   ',	3F8h, 000h, 1FFh,	358h, 000h, 054h,	disop_lcz_pin
-	disasm	'FLTNZ  ',	3F8h, 000h, 1FFh,	358h, 000h, 055h,	disop_lcz_pin
-	disasm	'FLTRND ',	3F8h, 000h, 1FFh,	358h, 000h, 056h,	disop_lcz_pin
-	disasm	'FLTNOT ',	3F8h, 000h, 1FFh,	358h, 000h, 057h,	disop_lcz_pin
-	disasm	'DRVL   ',	3F8h, 000h, 1FFh,	358h, 000h, 058h,	disop_lcz_pin
-	disasm	'DRVH   ',	3F8h, 000h, 1FFh,	358h, 000h, 059h,	disop_lcz_pin
-	disasm	'DRVC   ',	3F8h, 000h, 1FFh,	358h, 000h, 05Ah,	disop_lcz_pin
-	disasm	'DRVNC  ',	3F8h, 000h, 1FFh,	358h, 000h, 05Bh,	disop_lcz_pin
-	disasm	'DRVZ   ',	3F8h, 000h, 1FFh,	358h, 000h, 05Ch,	disop_lcz_pin
-	disasm	'DRVNZ  ',	3F8h, 000h, 1FFh,	358h, 000h, 05Dh,	disop_lcz_pin
-	disasm	'DRVRND ',	3F8h, 000h, 1FFh,	358h, 000h, 05Eh,	disop_lcz_pin
-	disasm	'DRVNOT ',	3F8h, 000h, 1FFh,	358h, 000h, 05Fh,	disop_lcz_pin
+	disasm	'dirl   ',	3F8h, 000h, 1FFh,	358h, 000h, 040h,	disop_lcz_pin
+	disasm	'dirh   ',	3F8h, 000h, 1FFh,	358h, 000h, 041h,	disop_lcz_pin
+	disasm	'dirc   ',	3F8h, 000h, 1FFh,	358h, 000h, 042h,	disop_lcz_pin
+	disasm	'dirnc  ',	3F8h, 000h, 1FFh,	358h, 000h, 043h,	disop_lcz_pin
+	disasm	'dirz   ',	3F8h, 000h, 1FFh,	358h, 000h, 044h,	disop_lcz_pin
+	disasm	'dirnz  ',	3F8h, 000h, 1FFh,	358h, 000h, 045h,	disop_lcz_pin
+	disasm	'dirrnd ',	3F8h, 000h, 1FFh,	358h, 000h, 046h,	disop_lcz_pin
+	disasm	'dirnot ',	3F8h, 000h, 1FFh,	358h, 000h, 047h,	disop_lcz_pin
+	disasm	'outl   ',	3F8h, 000h, 1FFh,	358h, 000h, 048h,	disop_lcz_pin
+	disasm	'outh   ',	3F8h, 000h, 1FFh,	358h, 000h, 049h,	disop_lcz_pin
+	disasm	'outc   ',	3F8h, 000h, 1FFh,	358h, 000h, 04Ah,	disop_lcz_pin
+	disasm	'outnc  ',	3F8h, 000h, 1FFh,	358h, 000h, 04Bh,	disop_lcz_pin
+	disasm	'outz   ',	3F8h, 000h, 1FFh,	358h, 000h, 04Ch,	disop_lcz_pin
+	disasm	'outnz  ',	3F8h, 000h, 1FFh,	358h, 000h, 04Dh,	disop_lcz_pin
+	disasm	'outrnd ',	3F8h, 000h, 1FFh,	358h, 000h, 04Eh,	disop_lcz_pin
+	disasm	'outnot ',	3F8h, 000h, 1FFh,	358h, 000h, 04Fh,	disop_lcz_pin
+	disasm	'fltl   ',	3F8h, 000h, 1FFh,	358h, 000h, 050h,	disop_lcz_pin
+	disasm	'flth   ',	3F8h, 000h, 1FFh,	358h, 000h, 051h,	disop_lcz_pin
+	disasm	'fltc   ',	3F8h, 000h, 1FFh,	358h, 000h, 052h,	disop_lcz_pin
+	disasm	'fltnc  ',	3F8h, 000h, 1FFh,	358h, 000h, 053h,	disop_lcz_pin
+	disasm	'fltz   ',	3F8h, 000h, 1FFh,	358h, 000h, 054h,	disop_lcz_pin
+	disasm	'fltnz  ',	3F8h, 000h, 1FFh,	358h, 000h, 055h,	disop_lcz_pin
+	disasm	'fltrnd ',	3F8h, 000h, 1FFh,	358h, 000h, 056h,	disop_lcz_pin
+	disasm	'fltnot ',	3F8h, 000h, 1FFh,	358h, 000h, 057h,	disop_lcz_pin
+	disasm	'drvl   ',	3F8h, 000h, 1FFh,	358h, 000h, 058h,	disop_lcz_pin
+	disasm	'drvh   ',	3F8h, 000h, 1FFh,	358h, 000h, 059h,	disop_lcz_pin
+	disasm	'drvc   ',	3F8h, 000h, 1FFh,	358h, 000h, 05Ah,	disop_lcz_pin
+	disasm	'drvnc  ',	3F8h, 000h, 1FFh,	358h, 000h, 05Bh,	disop_lcz_pin
+	disasm	'drvz   ',	3F8h, 000h, 1FFh,	358h, 000h, 05Ch,	disop_lcz_pin
+	disasm	'drvnz  ',	3F8h, 000h, 1FFh,	358h, 000h, 05Dh,	disop_lcz_pin
+	disasm	'drvrnd ',	3F8h, 000h, 1FFh,	358h, 000h, 05Eh,	disop_lcz_pin
+	disasm	'drvnot ',	3F8h, 000h, 1FFh,	358h, 000h, 05Fh,	disop_lcz_pin
 
-	disasm	'SPLITB ',	3FFh, 000h, 1FFh,	358h, 000h, 060h,	disop_d
-	disasm	'MERGEB ',	3FFh, 000h, 1FFh,	358h, 000h, 061h,	disop_d
-	disasm	'SPLITW ',	3FFh, 000h, 1FFh,	358h, 000h, 062h,	disop_d
-	disasm	'MERGEW ',	3FFh, 000h, 1FFh,	358h, 000h, 063h,	disop_d
-	disasm	'SEUSSF ',	3FFh, 000h, 1FFh,	358h, 000h, 064h,	disop_d
-	disasm	'SEUSSR ',	3FFh, 000h, 1FFh,	358h, 000h, 065h,	disop_d
-	disasm	'RGBSQZ ',	3FFh, 000h, 1FFh,	358h, 000h, 066h,	disop_d
-	disasm	'RGBEXP ',	3FFh, 000h, 1FFh,	358h, 000h, 067h,	disop_d
-	disasm	'XORO32 ',	3FFh, 000h, 1FFh,	358h, 000h, 068h,	disop_d
-	disasm	'REV    ',	3FFh, 000h, 1FFh,	358h, 000h, 069h,	disop_d
-	disasm	'RCZR   ',	3F9h, 000h, 1FFh,	358h, 000h, 06Ah,	disop_dcz
-	disasm	'RCZL   ',	3F9h, 000h, 1FFh,	358h, 000h, 06Bh,	disop_dcz
-	disasm	'WRC    ',	3FFh, 000h, 1FFh,	358h, 000h, 06Ch,	disop_d
-	disasm	'WRNC   ',	3FFh, 000h, 1FFh,	358h, 000h, 06Dh,	disop_d
-	disasm	'WRZ    ',	3FFh, 000h, 1FFh,	358h, 000h, 06Eh,	disop_d
-	disasm	'WRNZ   ',	3FFh, 000h, 1FFh,	358h, 000h, 06Fh,	disop_d
-	disasm	'MODC   ',	3FFh, 000h, 1FFh,	35Dh, 000h, 06Fh,	disop_dc_modc
-	disasm	'MODZ   ',	3FFh, 000h, 1FFh,	35Bh, 000h, 06Fh,	disop_dz_modz
-	disasm	'MODCZ  ',	3F9h, 000h, 1FFh,	359h, 000h, 06Fh,	disop_dcz_modcz
+	disasm	'splitb ',	3FFh, 000h, 1FFh,	358h, 000h, 060h,	disop_d
+	disasm	'mergeb ',	3FFh, 000h, 1FFh,	358h, 000h, 061h,	disop_d
+	disasm	'splitw ',	3FFh, 000h, 1FFh,	358h, 000h, 062h,	disop_d
+	disasm	'mergew ',	3FFh, 000h, 1FFh,	358h, 000h, 063h,	disop_d
+	disasm	'seussf ',	3FFh, 000h, 1FFh,	358h, 000h, 064h,	disop_d
+	disasm	'seussr ',	3FFh, 000h, 1FFh,	358h, 000h, 065h,	disop_d
+	disasm	'rgbsqz ',	3FFh, 000h, 1FFh,	358h, 000h, 066h,	disop_d
+	disasm	'rgbexp ',	3FFh, 000h, 1FFh,	358h, 000h, 067h,	disop_d
+	disasm	'xoro32 ',	3FFh, 000h, 1FFh,	358h, 000h, 068h,	disop_d
+	disasm	'rev    ',	3FFh, 000h, 1FFh,	358h, 000h, 069h,	disop_d
+	disasm	'rczr   ',	3F9h, 000h, 1FFh,	358h, 000h, 06Ah,	disop_dcz
+	disasm	'rczl   ',	3F9h, 000h, 1FFh,	358h, 000h, 06Bh,	disop_dcz
+	disasm	'wrc    ',	3FFh, 000h, 1FFh,	358h, 000h, 06Ch,	disop_d
+	disasm	'wrnc   ',	3FFh, 000h, 1FFh,	358h, 000h, 06Dh,	disop_d
+	disasm	'wrz    ',	3FFh, 000h, 1FFh,	358h, 000h, 06Eh,	disop_d
+	disasm	'wrnz   ',	3FFh, 000h, 1FFh,	358h, 000h, 06Fh,	disop_d
+	disasm	'modc   ',	3FFh, 000h, 1FFh,	35Dh, 000h, 06Fh,	disop_dc_modc
+	disasm	'modz   ',	3FFh, 000h, 1FFh,	35Bh, 000h, 06Fh,	disop_dz_modz
+	disasm	'modcz  ',	3F9h, 000h, 1FFh,	359h, 000h, 06Fh,	disop_dcz_modcz
 
-	disasm	'SETSCP ',	3FEh, 000h, 1FFh,	358h, 000h, 070h,	disop_l
-	disasm	'GETSCP ',	3FFh, 000h, 1FFh,	358h, 000h, 071h,	disop_d
+	disasm	'setscp ',	3FEh, 000h, 1FFh,	358h, 000h, 070h,	disop_l
+	disasm	'getscp ',	3FFh, 000h, 1FFh,	358h, 000h, 071h,	disop_d
 
-	disasm	'JMP    ',	3F8h, 000h, 000h,	360h, 000h, 000h,	disop_addr20
-	disasm	'CALL   ',	3F8h, 000h, 000h,	368h, 000h, 000h,	disop_addr20
-	disasm	'CALLA  ',	3F8h, 000h, 000h,	370h, 000h, 000h,	disop_addr20
-	disasm	'CALLB  ',	3F8h, 000h, 000h,	378h, 000h, 000h,	disop_addr20
-	disasm	'CALLD  ',	3E0h, 000h, 000h,	380h, 000h, 000h,	disop_p_addr20
-	disasm	'LOC    ',	3E0h, 000h, 000h,	3A0h, 000h, 000h,	disop_p_addr20
-	disasm	'AUGS   ',	3E0h, 000h, 000h,	3C0h, 000h, 000h,	disop_aug
-	disasm	'AUGD   ',	3E0h, 000h, 000h,	3E0h, 000h, 000h,	disop_aug
+	disasm	'jmp    ',	3F8h, 000h, 000h,	360h, 000h, 000h,	disop_addr20
+	disasm	'call   ',	3F8h, 000h, 000h,	368h, 000h, 000h,	disop_addr20
+	disasm	'calla  ',	3F8h, 000h, 000h,	370h, 000h, 000h,	disop_addr20
+	disasm	'callb  ',	3F8h, 000h, 000h,	378h, 000h, 000h,	disop_addr20
+	disasm	'calld  ',	3E0h, 000h, 000h,	380h, 000h, 000h,	disop_p_addr20
+	disasm	'loc    ',	3E0h, 000h, 000h,	3A0h, 000h, 000h,	disop_p_addr20
+	disasm	'augs   ',	3E0h, 000h, 000h,	3C0h, 000h, 000h,	disop_aug
+	disasm	'augd   ',	3E0h, 000h, 000h,	3E0h, 000h, 000h,	disop_aug
 
 	disasm	'<error>',	000h, 000h, 000h,	000h, 000h, 000h,	disop_none
 
-da_nop:	disasm	'NOP    ',	000h, 000h, 000h,	000h, 000h, 000h,	disop_none
+da_nop:	disasm	'nop    ',	000h, 000h, 000h,	000h, 000h, 000h,	disop_none
 ;
 ;
 ;************************************************************************
@@ -16261,6 +16413,9 @@ automatic_symbols:
 	sym	type_size,		0,		'BYTE'		;sizes
 	sym	type_size,		1,		'WORD'
 	sym	type_size,		2,		'LONG'
+
+	sym	type_size_fit,		0,		'BYTEFIT'	;size fits
+	sym	type_size_fit,		1,		'WORDFIT'
 
 	sym	type_fvar,		0,		'FVAR'		;fvar
 	sym	type_fvar,		1,		'FVARS'
