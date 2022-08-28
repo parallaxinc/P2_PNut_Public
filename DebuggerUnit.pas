@@ -1789,9 +1789,10 @@ begin
   begin
     ct := DebuggerMsg[mCTH2];
     ct := ct shl 32 or DebuggerMsg[mCTL2] and $FFFFFFFF;
-    Hint := 'Clock Ticks Since Reset | ' +
-            Format('%1.1n', [ct / P2.ClkFreq]) + ' seconds at ' +
-            Format('%1.0n', [P2.ClkFreq * 1.0]) + ' Hz';
+    Hint := 'Clock Ticks Since Reset';
+    if P2.ClkFreq <> 0 then Hint := Hint + ' | ' +
+      Format('%1.1n', [ct / P2.ClkFreq]) + ' seconds at ' +
+      Format('%1.0n', [P2.ClkFreq * 1.0]) + ' Hz';
   end
   // Make hint if in SFR data
   else if inSFRData then
@@ -2679,7 +2680,7 @@ begin
       // get slice metrics
       yl := y1_lut1[x1 div $100 - x div $100];
       yr := y2_lut1[x2 div $100 - x div $100];
-      y := ym div $100;    // TESTT was 'ym shr 8', but data was sometimes $00FFFFFF
+      y := ym div $100;
       // determine top
       if x <= lt then yt := yl - (y1 - y)
       else if x >= rt then yt := yr - (y2 - y)
@@ -2689,7 +2690,7 @@ begin
       else if x >= rb then yb := yr + (y2 - y)
       else yb := slice;
       // draw bottom-to-top slice at x
-      SmoothSlice(swapxy, x div $100, y - yt, y + yb, color, opacity);    // TESTT was 'x shr 8', but data was sometimes $00FFFFFF
+      SmoothSlice(swapxy, x div $100, y - yt, y + yb, color, opacity);
     end;
   // step x and y
   Inc(x, $100);
