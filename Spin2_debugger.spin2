@@ -51,9 +51,14 @@ CON	dat_addr	=	$FC000
 DAT		org
 '
 '
+' Configure the tx pin so that it stays high
+'
+t		wrpin	#%01_11110_0,@_txpin_/4
+'
+'
 ' Set clock mode
 '
-t		hubset	_clkmode1_		'start external clock, remain in rcfast mode	(reused as t)
+		hubset	_clkmode1_		'start external clock, remain in rcfast mode	(reused as t)
 		waitx	##20_000_000 / 100	'allow 10ms for external clock to stabilize
 		hubset	_clkmode2_		'switch to external clock mode
 
@@ -150,11 +155,11 @@ move		add	pa,#3			'round bytes up to long
 '
 ' Data set by compiler
 '
-_clkmode1_	long	0			'@0C4: clkmode with rcfast
-_clkmode2_	long	0			'@0C8: clkmode with external clock
-_delay_		long	0			'@0CC: initial delay (default is 0)
-_appsize_	long	0			'@0D0: application size in bytes
-_hubset_	long	$2003_00FF		'@0D4: cog-debug-enable bits in low byte (default is $FF)
+_clkmode1_	long	0			'@0C8: clkmode with rcfast
+_clkmode2_	long	0			'@0CC: clkmode with external clock
+_delay_		long	0			'@0D0: initial delay (default is 0)
+_appsize_	long	0			'@0D4: application size in bytes
+_hubset_	long	$2003_00FF		'@0D8: cog-debug-enable bits in low byte (default is $FF)
 '
 '
 ' *******************************************************
@@ -195,7 +200,7 @@ cond		mov	regh,#sav_addr & $1FF	'cond will hold BRK condition on exit
 		jmp	#\debug_entry		'jump to debug_entry (jmp was already pipelined)
 
 
-brk_cond	long	$00000010		'@108: $00C, COGBRK (set later) and BRK are initially enabled
+brk_cond	long	$00000010		'@10C: $00C, COGBRK (set later) and BRK are initially enabled
 cogbrk_flag	long	0			'      $00D, COGBRK flag is initially clear
 '
 '
@@ -255,10 +260,10 @@ debug_exit	setq	#$1F7-$010		'restore registers $010..$1F7 to free the save buffe
 '
 ' Data set by compiler
 '
-_txpin_		long	62			'@12C: tx pin (default is 62, msb = show timestamp)
-_rxpin_		long	63			'@130: rx pin (default is 63)
-_txmode_	long	0			'@134: tx/rx mode (2_000_000-8-N-1)
-_waitxms_	long	0			'@138: waitx value for 1ms delay
+_txpin_		long	62			'@130: tx pin (default is 62, msb = show timestamp)
+_rxpin_		long	63			'@134: rx pin (default is 63)
+_txmode_	long	0			'@138: tx/rx mode (2_000_000-8-N-1)
+_waitxms_	long	0			'@13C: waitx value for 1ms delay
 '
 '
 ' DEBUG interrupt entry or STALL return - saves cog data and determines what to do

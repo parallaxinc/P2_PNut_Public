@@ -30,6 +30,7 @@
 			public	P2InsertInterpreter
 			public	P2InsertDebugger
 			public	P2InsertFlashLoader
+			public	P2InsertClockSetter
 			public	P2ResetDebugSymbols
 			public	P2ParseDebugString
 			public	P2Disassemble
@@ -1703,6 +1704,29 @@ ddx		obj_stack_ptr				;recursion level
 ;
 ;
 ;************************************************************************
+;*  procedure P2InsertClockSetter;					*
+;************************************************************************
+;
+		proc	P2InsertClockSetter
+
+		cld
+		push	ebx
+		push	esi
+		push	edi
+		push	ebp
+
+		call	_insert_clock_setter
+
+		pop	ebp
+		pop	edi
+		pop	esi
+		pop	ebx
+		ret
+
+		endp	P2InsertClockSetter
+;
+;
+;************************************************************************
 ;*  procedure P2ResetDebugSymbols;					*
 ;************************************************************************
 ;
@@ -2477,6 +2501,18 @@ _insert_flash_loader:
 		mov	[esp_save],esp		;save esp in case of error
 
 		call	insert_flash_loader	;insert flash loader
+
+		jmp	compile_done		;exit
+;
+;
+; InsertClockSetter
+;
+_insert_clock_setter:
+
+		mov	[error],1		;init error to true
+		mov	[esp_save],esp		;save esp in case of error
+
+		call	insert_clock_setter	;insert clock setter
 
 		jmp	compile_done		;exit
 ;
@@ -5979,16 +6015,16 @@ insert_debugger:
 @@symlog:	db	'DEBUG_LOG_SIZE',0
 @@symoff:	db	'DEBUG_WINDOWS_OFF',0
 
-@@_clkmode1_	=	0C4h
-@@_clkmode2_	=	0C8h
-@@_delay_	=	0CCh
-@@_appsize_	=	0D0h
-@@_hubset_	=	0D4h
-@@_brkcond_	=	108h
-@@_txpin_	=	12Ch
-@@_rxpin_	=	130h
-@@_txmode_	=	134h
-@@_waitxms_	=	138h
+@@_clkmode1_	=	0C8h
+@@_clkmode2_	=	0CCh
+@@_delay_	=	0D0h
+@@_appsize_	=	0D4h
+@@_hubset_	=	0D8h
+@@_brkcond_	=	10Ch
+@@_txpin_	=	130h
+@@_rxpin_	=	134h
+@@_txmode_	=	138h
+@@_waitxms_	=	13Ch
 
 debugger:	include "Spin2_debugger.inc"
 debugger_end:
@@ -6008,6 +6044,10 @@ insert_flash_loader:
 		mov	ecx,eax
 	rep	movsb
 
+		cmp	[debug_mode],0		;if not debug mode, force NOP instruction at WRPIN 
+		jne	@@debugmode
+		mov	[dword obj+008h],0
+@@debugmode:
 		mov	ecx,[obj_ptr]		;compute negative sum of all data
 		shr	ecx,2
 		mov	ebx,0
@@ -6016,13 +6056,62 @@ insert_flash_loader:
 		sub	ebx,eax
 		loop	@@sum
 
-		mov	[dword obj+04h],ebx	;insert checksum into loader
+		mov	[dword obj+004h],ebx	;insert checksum into loader
 
 		ret
 
 
 flash_loader:	include	"flash_loader.inc"
 flash_loader_end:
+;
+;
+; Insert clock setter
+;
+insert_clock_setter:
+
+		cmp	[clkmode],00b			;if RCFAST mode, nothing to do
+		je	@@done
+
+		mov	eax,clock_setter_end-clock_setter	;move program upwards to accommodate clock setter
+		call	move_obj_up
+
+		lea	esi,[clock_setter]		;install clock setter
+		lea	edi,[obj]
+		mov	ecx,clock_setter_end-clock_setter
+	rep	movsb
+
+		cmp	[clkmode],01b			;NOP unneeded instructions
+		jne	@@notrcslow
+		mov	[dword obj+@@_ext1_],0		;RCSLOW
+		mov	[dword obj+@@_ext2_],0
+		mov	[dword obj+@@_ext3_],0
+		jmp	@@nopdone
+@@notrcslow:	mov	[dword obj+@@_rcslow_],0	;not RCSLOW
+@@nopdone:
+		mov	eax,[clkmode]			;install _clkmode2_
+		mov	[dword obj+@@_clkmode2_],eax
+
+		and	al,0FCh				;install _clkmode1_
+		mov	[dword obj+@@_clkmode1_],eax
+
+		mov	eax,[obj_ptr]			;install _appblocks_
+		shr	eax,9+2
+		inc	eax
+		mov	[dword obj+@@_appblocks_],eax
+
+@@done:		ret
+
+
+@@_ext1_	=	000h
+@@_ext2_	=	004h
+@@_ext3_	=	008h
+@@_rcslow_	=	028h
+@@_clkmode1_	=	034h
+@@_clkmode2_	=	038h
+@@_appblocks_	=	03Ch
+
+clock_setter:	include	"clock_setter.inc"
+clock_setter_end:
 ;
 ;
 ; Move obj block upward by eax bytes (reverse move)

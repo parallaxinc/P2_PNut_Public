@@ -2512,6 +2512,13 @@ begin
     if P2.Error then CompilerError(P2.ErrorMsg);  //aborts if error
     SaveFile(ExtFilename(CurrentFilename, 'bin2'), @P2.Obj, P2.ObjLength);
   end;
+  // insert clock setter?
+  if not P2.DebugMode and P2.PasmMode and (P2.ClkMode <> 0) then
+  begin
+    P2InsertClockSetter;
+    if P2.Error then CompilerError(P2.ErrorMsg);  //aborts if error
+    SaveFile(ExtFilename(CurrentFilename, 'bin2'), @P2.Obj, P2.ObjLength);
+  end;
   // insert flash loader?
   if ProgramFlash then
   begin

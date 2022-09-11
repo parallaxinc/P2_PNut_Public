@@ -1,11 +1,12 @@
 ' *** SPI FLASH PROGRAMMER AND BOOT LOADER
-' *** Writes loader and application to SPI flash, then reboots to execute.
+' *** Writes loader and application to SPI flash, then executes application.
 ' *** All data is checksum-verified before programming and on each boot.
 '
-' Use:	1) Append application bytes at app_start, pad to long alignment
-'	2) Write negative sum of all longs to long at offset 4
-'	3) Download all longs to execute flash programmer
-'	4) After flash programmer finishes, chip reboots to application.
+' Use:	1) Append application bytes at app_start, pad to long alignment.
+'	2) Write negative sum of all longs to long @004.
+'	3) Download all longs to execute flash programmer.
+'	4) After flash programmer finishes, application will execute.
+'	5) On next power-up, application will load from flash and execute.
 '
 '
 '	Program/Boot performance using Winbond W25Q128 (RCFAST)
@@ -35,8 +36,13 @@ CON	spi_cs = 61
 '
 DAT		org
 
-s		skip	#1			'@0: skip checksum			(reused as s)
-v		long	0			'@4: negative sum of all longs		(reused as v, set by compiler)
+s		skip	#1			'skip checksum						(reused as s)
+v		long	0			'@004: negative sum of all longs, set by compiler	(reused as v)
+'
+'
+' If DEBUG, configure the tx pin so that it stays high
+'
+t		wrpin	#%01_11110_0,#62	'@008: make tx high, NOP'd by compiler if not DEBUG	(reused as t)
 '
 '
 ' Get number of bytes, add $400 zero bytes after download, verify checksum
@@ -61,6 +67,7 @@ v		long	0			'@4: negative sum of all longs		(reused as v, set by compiler)
 		loc	ptra,#\@app_longs	'point to loader settings
 
 		sub	s,#@app_start/4		'get size of application in longs
+		mov	t,s			'save for application launch
 
 		wrlong	s,ptra++		'write app_longs in loader
 		wrlong	s,ptra++		'write app_longs2 in loader
@@ -81,7 +88,7 @@ v		long	0			'@4: negative sum of all longs		(reused as v, set by compiler)
 ' Determine number of 256-byte pages to program to flash
 '
 		add	s,#app_start		'get size of flash data in longs
-		add	s,#$3F			'round upwards to next chunk of 64 longs
+		add	s,#$3F			'round upwards to next chunk of 64 longs (256 bytes)
 		shr	s,#6			'get number of 256-byte pages of flash data
 		fge	s,#4			'a minimum of four pages are needed to cover loader
 '
@@ -102,7 +109,7 @@ v		long	0			'@4: negative sum of all longs		(reused as v, set by compiler)
 		rdfast	#0,#@loader		'start fifo read at loader
 '
 '
-' Main loop - erase 64KB/4KB blocks, program 256/16 sequential 256-byte pages, reboot when done
+' Program flash - erase 64KB/4KB blocks, program 256/16 sequential 256-byte pages
 '
 .block		cmp	s,#$40		wcz	'if pages <= $40, set 4KB erase @25ms
 	if_be	setd	.cmd,#$20		'(initially set for 64KB erase @140ms)
@@ -122,18 +129,33 @@ v		long	0			'@4: negative sum of all longs		(reused as v, set by compiler)
 
 		call	#spi_wait		'wait for program cycle to complete
 
-		djz	s,#.reboot		'decrement pages, reboot when done
+		djz	s,#.done		'decrement pages, done?
 
 		add	@zeroa/4,#$0001		'if not 64KB/4KB block boundary, program next page
 .tst		test	@zeroa/4,#$00FF	wz
 	if_nz	jmp	#.page
 
 		jmp	#.block			'else, erase next block
+
+.done		wrpin	#0,#spi_ck		'done, clear spi_ck smart pin mode
 '
 '
-' Done, reboot chip to launch application
+' Move application down to $00000+
 '
-.reboot		hubset	##$1000_0000		'generate hardware reset
+		mov	ptra,#@app_start
+		mov	ptrb,#0
+		shr	t,#9
+.move		setq2	#$200-1
+		rdlong	0,ptra++
+		setq2	#$200-1
+		wrlong	0,ptrb++
+		djnf	t,#.move
+'
+'
+' Relaunch cog 0 from $00000
+'
+
+		coginit	#0,#$00000
 '
 '
 ' SPI command, 1 byte - use callpa
@@ -174,7 +196,7 @@ spi_wait	callpa	#$05,#spi_cmd1		'read status register
 '
 ' Data
 '
-tranp		long	256 * 8 * 2
+tranp		long	256 * 8 * 2		'number of spi_ck transitions to load 256 bytes for programming
 bmode		long	$4081_0008 + spi_di<<17	'streamer mode, 1-pin output, bytes-msb-first, 1 byte from s
 lmode		long	$4081_0020 + spi_di<<17	'streamer mode, 1-pin output, bytes-msb-first, 4 bytes from s
 rmode		long	$8081_0800 + spi_di<<17	'streamer mode, 1-pin output, bytes-msb-first, $100 bytes from hub

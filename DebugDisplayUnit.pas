@@ -1177,7 +1177,7 @@ begin
       begin
         vTriggered := False;    // don't draw trigger indicator
         ClearBitmap;
-        BitmapToCanvas(0);      // TESTT do BitmapToCanvas at end
+        BitmapToCanvas(0);
         SamplePop := 0;
         vRateCount := 0;
       end;
@@ -3794,7 +3794,7 @@ begin
       // get slice metrics
       yl := y1_lut1[x1 div $100 - x div $100];
       yr := y2_lut1[x2 div $100 - x div $100];
-      y := ym div $100;    // TESTT was 'ym shr 8', but data was sometimes $00FFFFFF
+      y := ym div $100;
       // determine top
       if x <= lt then yt := yl - (y1 - y)
       else if x >= rt then yt := yr - (y2 - y)
@@ -3804,7 +3804,7 @@ begin
       else if x >= rb then yb := yr + (y2 - y)
       else yb := slice;
       // draw bottom-to-top slice at x
-      SmoothSlice(swapxy, x div $100, y - yt, y + yb, color, opacity);    // TESTT was 'x shr 8', but data was sometimes $00FFFFFF
+      SmoothSlice(swapxy, x div $100, y - yt, y + yb, color, opacity);
     end;
   // step x and y
   Inc(x, $100);

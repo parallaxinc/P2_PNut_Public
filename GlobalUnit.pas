@@ -145,6 +145,7 @@ end;
   procedure P2InsertInterpreter; external;
   procedure P2InsertDebugger; external;
   procedure P2InsertFlashLoader; external;
+  procedure P2InsertClockSetter; external;
   procedure P2ResetDebugSymbols; external;
   procedure P2ParseDebugString; external;
   procedure P2Disassemble; external;

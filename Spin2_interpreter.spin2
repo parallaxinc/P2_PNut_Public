@@ -27,11 +27,11 @@ DAT		org
 		wrlong	pbase_init,dbase_init
 
 		setq	dbase_init		'restart cog 0 with interpreter
-		coginit	#$20,##launch_spin
+		coginit	#hubexec,##launch_spin
 
 
 pbase_init	long	@test_pbase + 8				'$30 - compiler supplies initial pbase value, +8 without compiler
-vbase_init	long	@test_vbase + 0<<20			'$34 - compiler supplies initial vbase value, first pub in [31:20]
+vbase_init	long	@test_vbase + 0 << 20			'$34 - compiler supplies initial vbase value, first pub in [31:20]
 dbase_init	long	@test_dbase				'$38 - compiler supplies initial dbase value
 var_longs	long	(@test_dbase - @test_vbase) >> 2	'$3C - compiler supplies VAR longs to clear
 clkmode_hub	long	%1_000000_0000001111_1111_10_11		'$40 - compiler supplies initial clkmode value
