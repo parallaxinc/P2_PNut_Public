@@ -23,7 +23,7 @@ that will be included into the p2com.asm file:
 	Spin2_INCLUDE_interpreter.bas
 
 Next, the batch file p2com.bat must be executed to assemble
-the p2com.asm file, which inludes the four .inc files from
+the p2com.asm file, which includes the four .inc files from
 above.
 
 Finally, Delphi 6 (not included) is used to compile the
