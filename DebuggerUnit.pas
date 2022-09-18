@@ -25,8 +25,9 @@ const
   mFPTR                 = 15;
   mPTRA                 = 16;
   mPTRB                 = 17;
-  mCOND                 = 18;
-  DebuggerMsgSize       = 19;
+  mFREQ                 = 18;
+  mCOND                 = 19;
+  DebuggerMsgSize       = 20;
 
   cRed                  = $FF0000;
   cRed1                 = $BF0000;
@@ -1789,10 +1790,10 @@ begin
   begin
     ct := DebuggerMsg[mCTH2];
     ct := ct shl 32 or DebuggerMsg[mCTL2] and $FFFFFFFF;
-    Hint := 'Clock Ticks Since Reset';
-    if P2.ClkFreq <> 0 then Hint := Hint + ' | ' +
-      Format('%1.1n', [ct / P2.ClkFreq]) + ' seconds at ' +
-      Format('%1.0n', [P2.ClkFreq * 1.0]) + ' Hz';
+    i := DebuggerMsg[mFREQ];
+    Hint := 'Clock Ticks Since Reset | ' +
+      Format('%1.1n', [ct / i]) + ' seconds at ' +
+      Format('%1.0n', [i * 1.0]) + ' Hz';
   end
   // Make hint if in SFR data
   else if inSFRData then
@@ -1869,8 +1870,11 @@ begin
       Hint := 'Click or <ENTER> to stop executing through breaks'
     else
       Hint := 'L-Click or <SPACE> to execute to next break | R-Click or <ENTER> to execute through breaks';
-  end;
-  // Draw hint
+  end
+  // Make hint if off form
+  else if MouseMoveTimer.Enabled = False then
+    Hint := 'Clock frequency is ' + Format('%1.0n', [DebuggerMsg[mFREQ] * 1.0]) + ' Hz';
+ // Draw hint
   DrawText(HINTl, HINTt, cIndicator, [fsItalic], Hint);
 
   //  ------------

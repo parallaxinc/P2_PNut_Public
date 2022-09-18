@@ -42,7 +42,7 @@ v		long	0			'@004: negative sum of all longs, set by compiler	(reused as v)
 '
 ' If DEBUG, configure the tx pin so that it stays high
 '
-t		wrpin	#%01_11110_0,#62	'@008: make tx high, NOP'd by compiler if not DEBUG	(reused as t)
+t		wrpin	#%01_11110_0,#62-62	'@008: make tx high (NOP'd by compiler if not DEBUG, else fixed with debug_pin_tx)	(reused as t)
 '
 '
 ' Get number of bytes, add $400 zero bytes after download, verify checksum

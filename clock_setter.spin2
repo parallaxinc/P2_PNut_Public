@@ -24,7 +24,7 @@ ext3		hubset	_clkmode2_		'@008: switch to external clock mode			(NOP'd if rcslow
 '
 ' Set clock mode if RC_SLOW
 '
-rcslow		hubset	#1			'@02C: start external clock, remain in rcfast mode	(NOP'd if not rcslow)
+rcslow		hubset	#1			'@028: start external clock, remain in rcfast mode	(NOP'd if not rcslow)
 '
 '
 ' Relaunch cog 0 from $00000

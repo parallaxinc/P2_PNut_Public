@@ -1995,7 +1995,7 @@ error_ecor:	call	set_error
 		db	'Expected "," or ")"',0
 
 error_debugclk:	call	set_error
-		db	'DEBUG requires at least 10MHz of crystal/external clocking',0
+		db	'DEBUG requires at least 10 MHz of crystal/external clocking',0
 
 error_edot:	call	set_error
 		db	'Expected "."',0
@@ -2440,7 +2440,7 @@ _compile2:	mov	[error],1		;init error to true
 		call	compile_obj_symbols	;compile obj symbols
 		call	compile_con_blocks_2nd	;compile con blocks (2nd pass)
 		call	determine_clock		;determine clock settings
-		call	determine_download_baud	;determine download baud
+		call	determine_bauds_pins	;determine bauds and debug pins
 		call	compile_var_blocks	;compile var blocks
 		call	compile_dat_blocks	;compile dat blocks
 		call	compile_sub_blocks	;compile sub blocks
@@ -5672,6 +5672,45 @@ distill_obj_blocks:
 @@done:		ret
 ;
 ;
+; Collapse DEBUG data
+;
+collapse_debug_data:
+
+		cmp	[debug_mode],0		;if not debug mode, exit
+		je	@@done
+
+		cmp	[obj_stack_ptr],1	;if not bottom recursion level, exit
+		jne	@@done
+
+		xor	edx,edx			;find first empty debug table entry
+
+@@scan:		cmp	[word debug_data+edx],0
+		jne	@@next
+
+		movzx	ecx,[word debug_data]	;collapse space between debug table and debug data
+		sub	ecx,200h
+		jecxz	@@empty
+		lea	esi,[debug_data+200h]
+		lea	edi,[debug_data+edx]
+	rep	movsb
+@@empty:
+		mov	eax,200h		;adjust pointers downward
+		sub	eax,edx
+@@adjust:	sub	edx,2
+		js	@@done
+		sub	[word debug_data+edx],ax
+		jmp	@@adjust
+
+@@next:		add	edx,2
+		cmp	edx,200h
+		jne	@@scan
+@@done:
+		cmp	[word debug_data],debug_size_limit	;make sure data fits
+		ja	error_dditl
+
+		ret
+;
+;
 ; Compile final touches
 ;
 compile_final:	mov	[size_flash_loader],flash_loader_end-flash_loader	;set size_flash_loader
@@ -5722,227 +5761,44 @@ compile_final:	mov	[size_flash_loader],flash_loader_end-flash_loader	;set size_f
 @@done:		ret
 ;
 ;
-; Collapse DEBUG data
+; Determine download baud and debug pins and baud
 ;
-collapse_debug_data:
+determine_bauds_pins:
 
-		cmp	[debug_mode],0		;if not debug mode, exit
-		je	@@done
-
-		cmp	[obj_stack_ptr],1	;if not bottom recursion level, exit
-		jne	@@done
-
-		xor	edx,edx			;find first empty debug table entry
-
-@@scan:		cmp	[word debug_data+edx],0
-		jne	@@next
-
-		movzx	ecx,[word debug_data]	;collapse space between debug table and debug data
-		sub	ecx,200h
-		jecxz	@@empty
-		lea	esi,[debug_data+200h]
-		lea	edi,[debug_data+edx]
-	rep	movsb
-@@empty:
-		mov	eax,200h		;adjust pointers downward
-		sub	eax,edx
-@@adjust:	sub	edx,2
-		js	@@done
-		sub	[word debug_data+edx],ax
-		jmp	@@adjust
-
-@@next:		add	edx,2
-		cmp	edx,200h
-		jne	@@scan
-@@done:
-		cmp	[word debug_data],debug_size_limit	;make sure data fits
-		ja	error_dditl
-
-		ret
-;
-;
-; Insert interpreter
-;
-insert_interpreter:
-
-		mov	eax,[size_obj]		;adjust obj_ptr to trim off pub/con list
-		add	eax,8			;(+8 preserves vsize and psize longs)
-		mov	[obj_ptr],eax
-
-		mov	edx,0			;determine index of first pub
-@@findpub:	mov	eax,[dword obj+8+edx*8]
-		or	eax,eax
-		js	@@gotpub
-		inc	edx
-		jmp	@@findpub
-@@gotpub:	shl	edx,1+20		;get index into edx[31:20]
-
-		mov	eax,[size_interpreter]	;move object upwards to accommodate interpreter
-		sub	eax,8			;(-8 eliminates vsize and psize longs)
-		call	move_obj_up
-
-		lea	esi,[interpreter]	;install interpreter
-		lea	edi,[obj]
-		mov	ecx,[size_interpreter]
-	rep	movsb
-
-		mov	eax,[size_interpreter]	;set pbase_init
-		mov	[dword obj+30h],eax
-
-		add	eax,[size_obj]		;set vbase_init
-		or	edx,eax			;index of first pub in vbase_init[31:20]
-		mov	[dword obj+34h],edx
-
-		add	eax,[size_var]		;set dbase_init
-		mov	[dword obj+38h],eax
-
-		add	eax,400h		;ensure dbase has $100 longs of stack headroom
-
-		cmp	[debug_mode],0		;account for debugger
-		je	@@nodebug
-		add	eax,4000h
-@@nodebug:
-		cmp	eax,obj_limit		;verify that everything fits
-		jae	error_pex
-
-		mov	eax,[size_var]		;set var_longs
-		add	eax,400h		;include stack headroom so that first pub's params are cleared
-		shr	eax,2
-		dec	eax
-		mov	[dword obj+3Ch],eax
-
-		mov	eax,[clkmode]		;set clkmode_hub
-		mov	[dword obj+40h],eax
-
-		mov	eax,[clkfreq]		;set clkfreq_hub
-		mov	[dword obj+44h],eax
-
-		ret
-
-
-interpreter:	include	"Spin2_interpreter.inc"
-interpreter_end:
-;
-;
-; Insert debugger
-;
-insert_debugger:
-
-		test	[clkmode],10b			;make sure crystal/clock mode
-		jz	@@error
-		cmp	[clkfreq],10000000		;make sure >= 10MHz
-		jae	@@ok
-@@error:	jmp	error_debugclk
-@@ok:
-
-		mov	edx,[obj_ptr]			;get obj_ptr (application size)
-
-		movzx	eax,[word debug_data]		;move program upwards to accommodate debugger and debug data
-		add	eax,debugger_end-debugger
-		call	move_obj_up
-
-		lea	esi,[debugger]			;install debugger
-		lea	edi,[obj]
-		mov	ecx,debugger_end-debugger
-	rep	movsb
-
-		lea	esi,[debug_data]		;install debugger data
-		lea	edi,[obj + (debugger_end-debugger)]
-		movzx	ecx,[word debug_data]
-	rep	movsb
-
-		mov	[dword obj+@@_appsize_],edx	;install _appsize_
-
-		mov	eax,[clkmode]			;install _clkmode2_
-		mov	[dword obj+@@_clkmode2_],eax
-
-		and	al,0FCh				;install _clkmode1_
-		mov	[dword obj+@@_clkmode1_],eax
-
-		mov	eax,[download_baud]		;check for 'debug_baud' symbol, ready default value
-		mov	[debug_baud],eax
-		lea	esi,[@@symbaud]
-		call	@@checksymbol
-		jc	@@nosymbaud
-		jne	error_debugbaud
-		mov	[debug_baud],ebx
-@@nosymbaud:
-		mov	eax,[clkfreq]			;install _txmode_
-		mov	ebx,[debug_baud]
-		shr	ebx,6
-		xor	edx,edx
-		div	ebx
-		shl	eax,16-6
-		or	al,8-1
-		mov	[dword obj+@@_txmode_],eax
-
-		mov	eax,[clkfreq]			;install _waitxms_
-		xor	edx,edx
-		mov	ebx,1000
-		div	ebx
-		sub	eax,6				;account for 6-cycle/loop overhead
-		mov	[dword obj+@@_waitxms_],eax
-
-		lea	esi,[@@symcogs]			;check for 'debug_cogs' symbol
-		call	@@checksymbol
-		jc	@@nosymcogs
-		jne	error_debugcog
-		mov	[obj+@@_hubset_],bl
-@@nosymcogs:
-		lea	esi,[@@symcoginit]		;check for 'debug_coginit' symbol
-		call	@@checksymbol
-		jc	@@nosymcoginit
-		mov	[dword obj+@@_brkcond_],110h
-@@nosymcoginit:
-		lea	esi,[@@symmain]			;check for 'debug_main' symbol
-		call	@@checksymbol
-		jc	@@nosymmain
-		mov	[dword obj+@@_brkcond_],001h
-@@nosymmain:
-		lea	esi,[@@symdelay]		;check for 'debug_delay' symbol
-		call	@@checksymbol
-		jc	@@nosymdelay
-		jne	error_debugdly
-		mov	eax,[dword obj+@@_waitxms_]
-		mul	ebx
-		or	edx,edx				;limit to 0FFFFFFFFh
-		jz	@@symdelayok
-		mov	eax,0FFFFFFFFh
-@@symdelayok:	mov	[dword obj+@@_delay_],eax
-@@nosymdelay:
-		mov	[debug_pin_tx],62		;check for 'debug_pin' symbol (alias for 'debug_pin_tx')
-		lea	esi,[@@sympin]
-		call	@@checksymbol
-		jc	@@nosympin
-		jne	error_debugpin
-		and	bl,3Fh
-		mov	[obj+@@_txpin_],bl
+		lea	esi,[@@symlbaud]	;check for 'download_baud' symbol
+		call	check_debug_symbol
+		ja	error_downbaud		;if defined (c=0) and not integer (z=0), then error
+		jc	@@nosymlbaud
+		mov	[download_baud],ebx
+@@nosymlbaud:
+		lea	esi,[@@sympin]		;check for 'debug_pin' symbol
+		call	check_debug_symbol
+		ja	error_debugpin		;if defined (c=0) and not integer (z=0), then error
+		jnc	@@gotsympintx
+		lea	esi,[@@sympintx]	;check for 'debug_pin_tx' symbol
+		call	check_debug_symbol
+		ja	error_debugptx		;if defined (c=0) and not integer (z=0), then error
+		jnc	@@gotsympintx
+		mov	bl,62			;not defined, use 62
+@@gotsympintx:	and	bl,3Fh
 		mov	[debug_pin_tx],bl
-@@nosympin:
-		lea	esi,[@@sympintx]		;check for 'debug_pin_tx' symbol
-		call	@@checksymbol
-		jc	@@nosympintx
-		jne	error_debugptx
-		and	bl,3Fh
-		mov	[obj+@@_txpin_],bl
-		mov	[debug_pin_tx],bl
-@@nosympintx:
-		mov	[debug_pin_rx],63		;check for 'debug_pin_rx' symbol
-		lea	esi,[@@sympinrx]
-		call	@@checksymbol
-		jc	@@nosympinrx
-		jne	error_debugprx
-		and	bl,3Fh
-		mov	[obj+@@_rxpin_],bl
+
+		lea	esi,[@@sympinrx]	;check for 'debug_pin_rx' symbol
+		call	check_debug_symbol
+		ja	error_debugprx		;if defined (c=0) and not integer (z=0), then error
+		jnc	@@gotsympinrx
+		mov	bl,63			;not defined, use 63
+@@gotsympinrx:	and	bl,3Fh
 		mov	[debug_pin_rx],bl
-@@nosympinrx:
-		lea	esi,[@@symtimestamp]		;check for 'debug_timestamp' symbol
-		call	@@checksymbol
-		jc	@@nosymstamp
-		or	[obj+@@_txpin_+3],80h		;indicate timestamp in msb of _txpin_
-@@nosymstamp:
 
-		mov	ecx,-1				;check for host-side symbols
+		lea	esi,[@@symdbaud]	;check for 'debug_baud' symbol
+		call	check_debug_symbol
+		ja	error_debugbaud		;if defined (c=0) and not integer (z=0), then error
+		jnc	@@gotsymdbaud
+		mov	ebx,[download_baud]	;not defined, use download_baud
+@@gotsymdbaud:	mov	[debug_baud],ebx
+
+		mov	ecx,-1			;check for host-side symbols
 		lea	esi,[@@symleft]
 		lea	edi,[debug_left]
 		call	@@hostsymbol
@@ -5973,38 +5829,19 @@ insert_debugger:
 		ret
 
 
-@@hostsymbol:	call	@@checksymbol			;check for host-side symbol
+@@hostsymbol:	call	check_debug_symbol		;check for host-side symbol
 		jnc	@@hostsymbolok
 		mov	ebx,ecx
 @@hostsymbolok:	mov	[edi],ebx
 		ret
 
 
-@@checksymbol:	push	ecx				;check if symbol defined
-		push	edi
-		lea	edi,[symbol]
-		mov	ecx,symbol_limit+1
-	rep	movsb
-		call	find_symbol
-		cmp	al,type_undefined
-		stc					;c=1 if undefined
-		je	@@nosymbol
-		cmp	al,type_con
-		clc					;c=0 if defined, z=0 if not integer constant
-@@nosymbol:	pop	edi
-		pop	ecx
-		ret
+@@symlbaud:	db	'DOWNLOAD_BAUD',0
 
-
-@@symcogs:	db	'DEBUG_COGS',0
-@@symcoginit:	db	'DEBUG_COGINIT',0
-@@symmain:	db	'DEBUG_MAIN',0
-@@symdelay:	db	'DEBUG_DELAY',0
-@@sympin:	db	'DEBUG_PIN',0			;same purpose as debug_pin_tx
+@@sympin:	db	'DEBUG_PIN',0		;same purpose as debug_pin_tx
 @@sympintx:	db	'DEBUG_PIN_TX',0
 @@sympinrx:	db	'DEBUG_PIN_RX',0
-@@symbaud:	db	'DEBUG_BAUD',0
-@@symtimestamp:	db	'DEBUG_TIMESTAMP',0
+@@symdbaud:	db	'DEBUG_BAUD',0
 
 @@symleft:	db	'DEBUG_LEFT',0
 @@symtop:	db	'DEBUG_TOP',0
@@ -6014,17 +5851,216 @@ insert_debugger:
 @@symdistop:	db	'DEBUG_DISPLAY_TOP',0
 @@symlog:	db	'DEBUG_LOG_SIZE',0
 @@symoff:	db	'DEBUG_WINDOWS_OFF',0
+;
+;
+; Check for DEBUG-related symbol
+; esi must point to symbol name
+; c=1 if undefined, else ebx=value and z=0 if not integer constant
+;
+check_debug_symbol:
 
-@@_clkmode1_	=	0C8h
-@@_clkmode2_	=	0CCh
-@@_delay_	=	0D0h
-@@_appsize_	=	0D4h
-@@_hubset_	=	0D8h
-@@_brkcond_	=	10Ch
-@@_txpin_	=	130h
-@@_rxpin_	=	134h
-@@_txmode_	=	138h
-@@_waitxms_	=	13Ch
+		push	ecx			;check if symbol defined
+		push	edi
+		lea	edi,[symbol]
+		mov	ecx,symbol_limit+1
+	rep	movsb
+		call	find_symbol
+		cmp	al,type_undefined
+		stc				;c=1 if undefined
+		je	@@nosymbol
+		cmp	al,type_con
+		clc				;c=0 if defined, z=0 if not integer constant
+@@nosymbol:	pop	edi
+		pop	ecx
+		ret
+;
+;
+; Insert interpreter
+;
+insert_interpreter:
+
+		mov	eax,[size_obj]		;adjust obj_ptr to trim off pub/con list
+		add	eax,8			;(+8 preserves vsize and psize longs)
+		mov	[obj_ptr],eax
+
+		mov	edx,0			;determine index of first pub
+@@findpub:	mov	eax,[dword obj+8+edx*8]
+		or	eax,eax
+		js	@@gotpub
+		inc	edx
+		jmp	@@findpub
+@@gotpub:	shl	edx,1+20		;get index into edx[31:20]
+
+		mov	eax,[size_interpreter]	;move object upwards to accommodate interpreter
+		sub	eax,8			;(-8 eliminates vsize and psize longs)
+		call	move_obj_up
+
+		lea	esi,[interpreter]	;install interpreter
+		lea	edi,[obj]
+		mov	ecx,[size_interpreter]
+	rep	movsb
+
+		mov	eax,[size_interpreter]	;set pbase_init
+		mov	[dword obj+@@pbase_init],eax
+
+		add	eax,[size_obj]		;set vbase_init
+		or	edx,eax			;index of first pub in vbase_init[31:20]
+		mov	[dword obj+@@vbase_init],edx
+
+		add	eax,[size_var]		;set dbase_init
+		mov	[dword obj+@@dbase_init],eax
+
+		add	eax,400h		;ensure dbase has $100 longs of stack headroom
+
+		cmp	[debug_mode],0		;account for debugger
+		je	@@nodebug
+		add	eax,4000h
+@@nodebug:
+		cmp	eax,obj_limit		;verify that everything fits
+		jae	error_pex
+
+		mov	eax,[size_var]		;set var_longs
+		add	eax,400h		;include stack headroom so that first pub's params are cleared
+		shr	eax,2
+		dec	eax
+		mov	[dword obj+@@var_longs],eax
+
+		mov	eax,[clkmode]		;set clkmode_hub
+		mov	[dword obj+@@clkmode_hub],eax
+
+		mov	eax,[clkfreq]		;set clkfreq_hub
+		mov	[dword obj+@@clkfreq_hub],eax
+
+		cmp	[debug_mode],0		;if not debug mode, force NOP instructions
+		jne	@@debugmode
+		mov	[dword obj+@@_debugnop1_],0
+		mov	[dword obj+@@_debugnop2_],0
+		mov	[dword obj+@@_debugnop3_],0
+		jmp	@@notdebugmode
+@@debugmode:	movzx	eax,[debug_pin_rx]	;debug mode, install debug_pin_rx into instructions
+		or	[dword obj+@@_debugnop2_],eax
+		shl	eax,9
+		or	[dword obj+@@_debugnop1_],eax
+		or	[dword obj+@@_debugnop3_],eax
+@@notdebugmode:
+		ret
+
+
+@@pbase_init	=	30h
+@@vbase_init	=	34h
+@@dbase_init	=	38h
+@@var_longs	=	3Ch
+@@clkmode_hub	=	40h
+@@clkfreq_hub	=	44h
+@@_debugnop1_	=	0D30h
+@@_debugnop2_	=	0D34h
+@@_debugnop3_	=	0D38h
+
+interpreter:	include	"Spin2_interpreter.inc"
+interpreter_end:
+;
+;
+; Insert debugger
+;
+insert_debugger:
+
+		test	[clkmode],10b			;make sure crystal/clock mode
+		jz	@@error
+		cmp	[clkfreq],10000000		;make sure >= 10 MHz
+		jae	@@ok
+@@error:	jmp	error_debugclk
+@@ok:
+
+		mov	edx,[obj_ptr]			;get obj_ptr (application size)
+
+		movzx	eax,[word debug_data]		;move program upwards to accommodate debugger and debug data
+		add	eax,debugger_end-debugger
+		call	move_obj_up
+
+		lea	esi,[debugger]			;install debugger
+		lea	edi,[obj]
+		mov	ecx,debugger_end-debugger
+	rep	movsb
+
+		lea	esi,[debug_data]		;install debugger data
+		lea	edi,[obj + (debugger_end-debugger)]
+		movzx	ecx,[word debug_data]
+	rep	movsb
+
+		mov	[dword obj+@@_appsize_],edx	;install _appsize_
+
+		mov	eax,[clkfreq]			;install _clkfreq_
+		mov	[dword obj+@@_clkfreq_],eax
+
+		mov	eax,[clkmode]			;install _clkmode2_
+		mov	[dword obj+@@_clkmode2_],eax
+
+		and	al,0FCh				;install _clkmode1_
+		mov	[dword obj+@@_clkmode1_],eax
+
+		lea	esi,[@@symcogs]			;check for 'debug_cogs' symbol
+		call	check_debug_symbol
+		jc	@@nosymcogs
+		jne	error_debugcog
+		mov	[obj+@@_hubset_],bl
+@@nosymcogs:
+		lea	esi,[@@symcoginit]		;check for 'debug_coginit' symbol
+		call	check_debug_symbol
+		jc	@@nosymcoginit
+		mov	[dword obj+@@_brkcond_],110h
+@@nosymcoginit:
+		lea	esi,[@@symmain]			;check for 'debug_main' symbol
+		call	check_debug_symbol
+		jc	@@nosymmain
+		mov	[dword obj+@@_brkcond_],001h
+@@nosymmain:
+		lea	esi,[@@symdelay]		;check for 'debug_delay' symbol
+		call	check_debug_symbol
+		jc	@@nosymdelay
+		jne	error_debugdly
+		mov	eax,[clkfreq]
+		xor	edx,edx
+		mov	ecx,1000
+		div	ecx
+		mul	ebx
+		or	edx,edx				;limit to 0FFFFFFFFh
+		jz	@@symdelayok
+		mov	eax,0FFFFFFFFh
+@@symdelayok:	mov	[dword obj+@@_delay_],eax
+@@nosymdelay:
+		mov	al,[debug_pin_tx]		;set _txpin_
+		mov	[obj+@@_txpin_],al
+
+		mov	al,[debug_pin_rx]		;set _rxpin_
+		mov	[obj+@@_rxpin_],al
+
+		mov	eax,[debug_baud]		;install _baud_
+		mov	[dword obj+@@_baud_],eax
+
+		lea	esi,[@@symtimestamp]		;check for 'debug_timestamp' symbol
+		call	check_debug_symbol
+		jc	@@nosymstamp
+		or	[obj+@@_rxpin_+3],80h		;indicate timestamp in msb of _rxpin_
+@@nosymstamp:
+		ret
+
+
+@@symcogs:	db	'DEBUG_COGS',0
+@@symcoginit:	db	'DEBUG_COGINIT',0
+@@symmain:	db	'DEBUG_MAIN',0
+@@symdelay:	db	'DEBUG_DELAY',0
+@@symtimestamp:	db	'DEBUG_TIMESTAMP',0
+
+@@_clkfreq_	=	0D4h
+@@_clkmode1_	=	0D8h
+@@_clkmode2_	=	0DCh
+@@_delay_	=	0E0h
+@@_appsize_	=	0E4h
+@@_hubset_	=	0E8h
+@@_brkcond_	=	11Ch
+@@_txpin_	=	140h
+@@_rxpin_	=	144h
+@@_baud_	=	148h
 
 debugger:	include "Spin2_debugger.inc"
 debugger_end:
@@ -6046,8 +6082,11 @@ insert_flash_loader:
 
 		cmp	[debug_mode],0		;if not debug mode, force NOP instruction at WRPIN 
 		jne	@@debugmode
-		mov	[dword obj+008h],0
-@@debugmode:
+		mov	[dword obj+@@_debugnop_],0
+		jmp	@@notdebugmode
+@@debugmode:	mov	al,[debug_pin_tx]	;debug mode, install debug_pin_tx into WRPIN
+		or	[obj+@@_debugnop_],al
+@@notdebugmode:
 		mov	ecx,[obj_ptr]		;compute negative sum of all data
 		shr	ecx,2
 		mov	ebx,0
@@ -6056,10 +6095,13 @@ insert_flash_loader:
 		sub	ebx,eax
 		loop	@@sum
 
-		mov	[dword obj+004h],ebx	;insert checksum into loader
+		mov	[dword obj+@@_checksum_],ebx	;insert checksum into loader
 
 		ret
 
+
+@@_checksum_	=	04h
+@@_debugnop_	=	08h
 
 flash_loader:	include	"flash_loader.inc"
 flash_loader_end:
@@ -6239,14 +6281,14 @@ determine_clock:
 		jmp	error_codcssf
 
 
-@@clk:		mov	[clkmode],1011b		;_CLKFREQ	(assumes 20MHz crystal)
+@@clk:		mov	[clkmode],1011b		;_CLKFREQ	(assumes 20 MHz crystal)
 		mov	eax,20000000
 		jmp	@@pll
 
 @@clk_xtl:	cmp	[@@xtlfreq],16000000	;_CLKFREQ + _XTLFREQ
 		mov	[clkmode],1011b
 		jae	@@pf
-		mov	[clkmode],1111b		;_XTLFREQ < 16MHz, use 15pF instead of 7.5pF
+		mov	[clkmode],1111b		;_XTLFREQ < 16 MHz, use 15pF instead of 7.5pF
 @@pf:		mov	eax,[@@xtlfreq]
 		jmp	@@pll
 
@@ -6255,7 +6297,7 @@ determine_clock:
 @@pll:		mov	[xinfreq],eax
 		mov	ebx,[@@clkfreq]
 		mov	ecx,[@@errfreq]
-		test	[@@flags],100000b	;if no _ERRFREQ, use default of 1MHz (always works)
+		test	[@@flags],100000b	;if no _ERRFREQ, use default of 1 MHz (always works)
 		jnz	@@goterr
 		mov	ecx,1000000
 @@goterr:	call	pll_calc
@@ -6267,7 +6309,7 @@ determine_clock:
 @@xtl:		cmp	[@@xtlfreq],16000000	;_XTLFREQ
 		mov	[clkmode],1010b
 		jae	@@pf2
-		mov	[clkmode],1110b		;_XTLFREQ < 16MHz, use 15pF instead of 7.5pF
+		mov	[clkmode],1110b		;_XTLFREQ < 16 MHz, use 15pF instead of 7.5pF
 @@pf2:		mov	eax,[@@xtlfreq]
 		mov	[clkfreq],eax
 		mov	[xinfreq],eax
@@ -6351,12 +6393,12 @@ pll_calc:	mov	[@@xinfreq],eax
 		mov	[@@found],0		;clear the found flag in case no success
 		mov	[@@error],ecx		;set initial error allowance
 
-		cmp	[@@xinfreq],250000	;xinfreq must be 250KHz to 500MHz
+		cmp	[@@xinfreq],250000	;xinfreq must be 250 KHz to 500 MHz
 		jb	@@abort
 		cmp	[@@xinfreq],500000000
 		ja	@@abort
 
-		cmp	[@@clkfreq],3333333	;clkfreq must be 3.333333MHz to 500MHz
+		cmp	[@@clkfreq],3333333	;clkfreq must be 3.333333 MHz to 500 MHz
 		jb	@@abort
 		cmp	[@@clkfreq],500000000
 		ja	@@abort
@@ -6425,10 +6467,10 @@ pll_calc:	mov	[@@xinfreq],eax
 		cmp	[@@mult],1024		;is mult 1024 or less?
 		ja	@@nope
 
-		cmp	[@@fvco],99000000	;is fvco at least 99MHz?
+		cmp	[@@fvco],99000000	;is fvco at least 99 MHz?
 		jb	@@nope
 
-		cmp	[@@fvco],201000000	;is fvco no more than 201MHz?
+		cmp	[@@fvco],201000000	;is fvco no more than 201 MHz?
 		jbe	@@yep
 
 		mov	eax,[@@clkfreq]		;is fvco no more than clkfreq + errfreq?
@@ -6492,28 +6534,6 @@ ddx		@@fvco
 ddx		@@fout
 ddx		@@mode
 ddx		@@freq
-;
-;
-; Determine download baud
-;
-determine_download_baud:
-
-		lea	esi,[@@symbol]		;look for DOWNLOAD_BAUD symbol
-		lea	edi,[symbol]
-		mov	ecx,symbol_limit+1
-	rep	movsb
-		call	find_symbol
-
-		cmp	al,type_undefined	;if undefined, don't affect
-		je	@@undefined
-		cmp	al,type_con		;if not integer, error
-		jne	error_downbaud
-		mov	[download_baud],ebx	;integer, set download_baud
-@@undefined:
-		ret
-
-
-@@symbol	db	'DOWNLOAD_BAUD',0
 ;
 ;
 ; Print doc data

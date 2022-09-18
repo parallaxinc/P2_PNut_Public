@@ -1618,6 +1618,10 @@ clkset_init	rep	#99,#1			'use REP to stall interrupts until _ret_
 
 		hubset	y			'now switch to new settings
 
+_debugnop1_	dirh	#63-63			'write clkfreq to rx pin long repository
+_debugnop2_	wxpin	z,#63-63
+_debugnop3_	dirl	#63-63			'(these 3 are NOP'd by compiler if not DEBUG, else fixed with debug_pin_rx)
+
 		setq	#2-1			'update clkmode and clkfreq
 	_ret_	wrlong	y,#@clkmode_hub
 '

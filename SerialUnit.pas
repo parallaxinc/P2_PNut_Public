@@ -4,7 +4,7 @@ interface
 
 uses
   SysUtils, WinTypes, WinProcs, Classes, Forms, Messages, Dialogs,
-  ExtCtrls, Graphics, MMSystem_D10_2;
+  ExtCtrls, Graphics, MMSystem;
 
 type
   TSerialThread = class(TThread)

@@ -415,7 +415,6 @@ begin
     P2.DebugDisplayLeft := 0;
     P2.DebugDisplayTop := 210;
     P2.DebugLogSize := 0;
-    P2.ClkFreq := 0;                            // clear ClkFreq to signal 'unknown' to debugger
     try
       StartDebug;
     except

@@ -8,6 +8,8 @@ CON	dat_addr	=	$FC000
 	sav_addr	=	$FEA00
 	dbg_addr	=	$FF1A0
 	dbg_size	=	$FFC00 - dbg_addr
+
+	overlay_end	=	$1F7
 '
 '
 ' ********************
@@ -56,13 +58,20 @@ DAT		org
 t		wrpin	#%01_11110_0,@_txpin_/4
 '
 '
+' Configure the rx pin as a long repository to hold the clock frequency
+'
+		wrpin	#%00_00001_0,@_rxpin_/4
+		dirh	@_rxpin_/4
+		wxpin	_clkfreq_,@_rxpin_/4
+'
+'
 ' Set clock mode
 '
 		hubset	_clkmode1_		'start external clock, remain in rcfast mode	(reused as t)
 		waitx	##20_000_000 / 100	'allow 10ms for external clock to stabilize
 		hubset	_clkmode2_		'switch to external clock mode
 
-		waitx	_delay_			'do any initial delay
+		waitx	_delay_			'do any startup delay
 '
 '
 ' Allocate lock[15]
@@ -155,11 +164,12 @@ move		add	pa,#3			'round bytes up to long
 '
 ' Data set by compiler
 '
-_clkmode1_	long	0			'@0C8: clkmode with rcfast
-_clkmode2_	long	0			'@0CC: clkmode with external clock
-_delay_		long	0			'@0D0: initial delay (default is 0)
-_appsize_	long	0			'@0D4: application size in bytes
-_hubset_	long	$2003_00FF		'@0D8: cog-debug-enable bits in low byte (default is $FF)
+_clkfreq_	long	0			'@0D4: initial clock frequency
+_clkmode1_	long	0			'@0D8: initial clkmode with rcfast
+_clkmode2_	long	0			'@0DC: initial clkmode with external clock
+_delay_		long	0			'@0E0: startup delay (default is 0)
+_appsize_	long	0			'@0E4: application size in bytes
+_hubset_	long	$2003_00FF		'@0E8: cog-debug-enable bits in low byte (default is $FF)
 '
 '
 ' *******************************************************
@@ -200,7 +210,7 @@ cond		mov	regh,#sav_addr & $1FF	'cond will hold BRK condition on exit
 		jmp	#\debug_entry		'jump to debug_entry (jmp was already pipelined)
 
 
-brk_cond	long	$00000010		'@10C: $00C, COGBRK (set later) and BRK are initially enabled
+brk_cond	long	$00000010		'@11C: $00C, COGBRK (set later) and BRK are initially enabled
 cogbrk_flag	long	0			'      $00D, COGBRK flag is initially clear
 '
 '
@@ -235,7 +245,7 @@ debug_exit	setq	#$1F7-$010		'restore registers $010..$1F7 to free the save buffe
 ' This 'stall' program gets assembled into $004..$00F
 '
 ' $000-	cth	long	0			'old	<unused>
-' $001-	ctl	long	_waitxms_ << 6		'old	waitx 64ms value
+' $001-	ctl	long	freq >> 16		'old	waitx 64ms value
 ' $002-	regh	long	sav_addr		'old	pointer to save buffer
 ' $003-	cond	long	0			'old	<unused>
 '
@@ -244,7 +254,7 @@ debug_exit	setq	#$1F7-$010		'restore registers $010..$1F7 to free the save buffe
 '
 ' $006-		lockrel	#15			'old	release lock[15] so other cogs can own the save buffer and tx/rx pins
 '
-' $007-	if_nz	waitx	ctl			'old	wait for 64ms (z must be clear)
+' $007-	if_nz	waitx	ctl			'old	wait for ~64ms (z must be clear)
 '
 ' $008-	.wait	locktry	#15		wc	'new	wait for lock[15] so that we own the save buffer and tx/rx pins again
 ' $009-	if_nc	jmp	#.wait			'new
@@ -260,10 +270,11 @@ debug_exit	setq	#$1F7-$010		'restore registers $010..$1F7 to free the save buffe
 '
 ' Data set by compiler
 '
-_txpin_		long	62			'@130: tx pin (default is 62, msb = show timestamp)
-_rxpin_		long	63			'@134: rx pin (default is 63)
-_txmode_	long	0			'@138: tx/rx mode (2_000_000-8-N-1)
-_waitxms_	long	0			'@13C: waitx value for 1ms delay
+_txpin_		long	62			'@140: tx pin (default is 62, msb = tx output flag)
+_rxpin_		long	63			'@144: rx pin (default is 63, msb = show timestamp)
+_baud_		long	0			'@148: baud rate
+
+dlyms		long	0			'exit delay in ms
 '
 '
 ' DEBUG interrupt entry or STALL return - saves cog data and determines what to do
@@ -295,7 +306,7 @@ debug_entry
 
 regl		brk	#0			'in case stall entry, show debug interrupt return address at inb
 
-cogn		cogid	cogn			'00: get cogid (cogn..ptrb_ form contiguous data, cogn = 0..7)
+cogn		cogid	cogn			'00: get cogid (cogn = 0..7, cogn..freq form contiguous data)
 brkcz		getbrk	brkcz		wcz	'01: get status wcz
 brkc		getbrk	brkc		wc	'02: get status wc
 brkz		getbrk	brkz		wz	'03: get status wz
@@ -313,6 +324,7 @@ iret		mov	iret,inb		'0E: get debug interrupt return address
 fptr		getptr	fptr			'0F: get rdfast/wrfast pointer
 ptra_		mov	ptra_,ptra		'10: get ptra
 ptrb_		mov	ptrb_,ptrb		'11: get ptrb
+freq		rqpin	freq,_rxpin_		'12: get clock frequency from rx pin in repository mode
 
 t1		decod	regl,#11		'show ina/inb (must be disabled before RETI0)
 t2		brk	regl
@@ -323,28 +335,40 @@ x		shl	regl,#7
 y		sub	ctl,#62		wc	'trim 64-bit ct from initial debug_entry (not from stall)
 z		subx	cth,#0
 
-buff						'16-register buffer used by breakpoint
+txrx		encod	x,freq			'compute (freq / _baud_) for tx/rx configuration
+ptr		encod	y,_baud_
+msb		sub	x,y
+dig		add	x,#1
+ma		shl	_baud_,x
+mb		mov	y,freq
+xa		rep	#3,#32+1		'do long division to preserve any user cordic results
+xb		cmpsub	y,_baud_	wc
+expa		rcl	txrx,#1
+expb		shl	y,#1
+		subr	x,#16			'position clocks-per-bit
+		shr	txrx,x
+		setbyte	txrx,#8-1,#0		'set 8-N-1
 
-ptr		fltl	_txpin_			'reset and configure tx pin
-msb		wrpin	#%01_11110_0,_txpin_
-ma		wxpin	_txmode_,_txpin_
-mb		drvl	_txpin_
+		fltl	_txpin_			'reset and configure tx pin
+		wrpin	#%01_11110_0,_txpin_
+		wxpin	txrx,_txpin_
+		drvl	_txpin_
 
-xa		fltl	_rxpin_			'reset and configure rx pin
-xb		wrpin	#%00_11111_0,_rxpin_
-expa		wxpin	_txmode_,_rxpin_
-expb		drvl	_rxpin_
+		fltl	_rxpin_			'reset and configure rx pin
+		wrpin	#%00_11111_0,_rxpin_
+		wxpin	txrx,_rxpin_
+		drvl	_rxpin_
 
-dig		mov	ptrb,regl		'point to cog's ISR (use ptrb to preserve ptra for Spin2 DEBUG message)
+		mov	ptrb,regl		'point to cog's ISR (use ptrb to preserve ptra for Spin2 DEBUG message)
 
-		rdlong	cond,ptrb[$1C]		'if return from stall, do breakpoint
+		rdlong	cond,ptrb[$1C]		'if return from stall, handle breakpoint
 		testb	cond,#11	wc
   if_c		jmp	#.breakpoint
 
 		testb	brkcz,#23	wc	'if COGINIT, output message
   if_c		call	#coginit_
 
-		rdlong	t1,ptrb[$1D]	wz	'if COGBRK, clear flag and do breakpoint
+		rdlong	t1,ptrb[$1D]	wz	'if COGBRK, clear flag and handle breakpoint
   if_nz		wrlong	#0,ptrb[$1D]
   if_nz		jmp	#.breakpoint
 
@@ -355,17 +379,20 @@ dig		mov	ptrb,regl		'point to cog's ISR (use ptrb to preserve ptra for Spin2 DEB
   if_nc_and_nz	getbyte	ptr,brkcz,#3
   if_nc_and_nz	tjnz	ptr,#debug_message
 
-.breakpoint	loc	pb,#dbg_addr+(@overlay_bp-@debugger)	'load DEBUG breakpoint overlay
-		setq	#$1F7-overlay				'read in overlay code and execute it
-		rdlong	overlay,pb
+.breakpoint	loc	pb,#\dbg_addr+(@bp_handler-@debugger)	'load breakpoint handler overlay
+		setq	#overlay_end-overlay_begin		'read in overlay code and execute it
+		rdlong	overlay_begin,pb
 
-		jmp	#breakpoint
+		jmp	#bp_handler
 '
 '
 ' Debug done
 '
 debug_done	rdpin	t1,_txpin_ 	 wc	'wait for tx not busy
 	if_c	jmp	#debug_done
+
+		wrpin	#%00_00001_0,_rxpin_	'set rx pin back to repository mode
+		wxpin	freq,_rxpin_		'write freq back to rx pin repository
 
 		fltl	_txpin_			'disable tx pin
 		fltl	_rxpin_			'disable rx pin
@@ -382,7 +409,8 @@ debug_done	rdpin	t1,_txpin_ 	 wc	'wait for tx not busy
 		mov	ptra,ptra_		'restore ptra
 		mov	ptrb,ptrb_		'restore ptrb
 
-		mov	ctl,_waitxms_		'save waitx 1ms value into ctl
+		mov	ctl,freq		'get waitx ~1ms value into ctl
+		shr	ctl,#10
 
 		testb	cond,#11	wc	'exit or stall?
 
@@ -390,7 +418,7 @@ debug_done	rdpin	t1,_txpin_ 	 wc	'wait for tx not busy
 
 	if_nc	mov	cth,dlyms	wz	'if exit, get exit delay, z=1 if 0
 
-	if_c	shl	ctl,#6		wz	'if stall, get waitx 64ms value into ctl, z=0
+	if_c	shl	ctl,#6		wz	'if stall, get waitx ~64ms value into ctl, z=0
 
 	if_c	setq	#$00F-$008		'if stall, load locktry..jmp in $008..$00F
 	if_c	rdlong	$008,##$FFFC0+$004*4
@@ -414,18 +442,18 @@ txword		mov	t1,pa			'assemble word as %HHHHHHHH01LLLLLLLL
 		bith	pa,#8
 		bitl	pa,#9
 
-		setbyte	_txmode_,#17,#0		'ready 18-bit mode for fast word transmit
+		setbyte	txrx,#17,#0		'ready 18-bit mode for fast word transmit
 
 txbyte		rdpin	t2,_txpin_	 wc	'wait until tx not busy
 	if_c	jmp	#txbyte
 
-		wxpin	_txmode_,_txpin_	'set 18-bit or 8-bit mode
+		wxpin	txrx,_txpin_		'set 18-bit or 8-bit mode
 
 		wypin	pa,_txpin_		'output byte
 
-		setbyte	_txmode_,#7,#0		'ready 8-bit mode
+		setbyte	txrx,#7,#0		'ready 8-bit mode
 
-		bith	_lin,#31		'set flag to indicate tx output has occurred
+		bith	_txpin_,#31		'set flag to indicate tx output has occurred
 
 		ret			wcz	'return with preserved flags
 '
@@ -487,14 +515,12 @@ rwreg		signx	x,#9		wc	'lut $200..$3FF? (signx simplifies comparisons)
 '
 ' End static code and begin overlay area
 '
-overlay
+overlay_begin
 '
 '
-'***************************
-'*  DEBUG-Message Overlay  *
-'***************************
-'
-overlay_msg
+'*****************************
+'*  Message Handler Overlay  *
+'*****************************
 '
 '
 ' Show COGINIT message, preserves c/z
@@ -568,7 +594,7 @@ debug_byte	callpa	#z,#getdeb		'get DEBUG bytecode
 
 .dly		call	#getval			'DLY(ms), get ms
 		mov	dlyms,x
-.done		testb	_lin,#31  	 wc	'if tx output has occurred, output new line
+.done		testb	_txpin_,#31  	 wc	'if tx output has occurred, output new line
 	if_c	callpb	#_lin,#rstrout
 		jmp	#debug_done
 
@@ -605,7 +631,7 @@ cognout		setnib	_cog,cogn,#6		'get cog number into string
 
 		mov	msb,#31			'enable 32-bit output
 
-	_ret_	tjs	_txpin_,#.time		'timestamp?
+	_ret_	tjs	_rxpin_,#.time		'timestamp?
 
 .time		mov	x,cth			'output cth
 		call	#hexout
@@ -931,7 +957,6 @@ binout		callpa	#"%",#txbyte2		'output "%"
 ' Defined data
 '
 asm		long	0			'0 = spin, 1 = asm
-dlyms		long	0			'exit delay in ms
 
 _cog		byte	"Cog0  ",0,0		'strings
 _ini		byte	"INIT ",0,0,0
@@ -943,26 +968,25 @@ _nil		byte	"nil",0
 _nan		byte	"NaN",0
 _key		byte	"PC_KEY",13,10,0,0,0,0
 _mou		byte	"PC_MOUSE"
-_lin		byte	13,10,0,0		'bit 31 of _lin is used as a flag
+_lin		byte	13,10,0,0
 
-		fit	$1F8
+		fit	overlay_end+1
 '
 '
-'******************************
-'*  DEBUG Breakpoint Overlay  *
-'******************************
+'********************************
+'*  Breakpoint Handler Overlay  *
+'********************************
 '
-		org	overlay
-overlay_bp
+		org	overlay_begin
 '
 '
-' Breakpoint
+' Breakpoint handler
 '
-breakpoint	mov	z,#cogn			'send cogn..ptrb_
+bp_handler	mov	z,#cogn			'send cogn..freq
 .packet		alts	z
 		mov	pa,0-0
 		call	#txlong
-		incmod	z,#ptrb_	wc
+		incmod	z,#freq		wc
 	if_nc	jmp	#.packet		'(z=0 after)
 
 		mov	pa,cond			'send BRK condition
@@ -1089,7 +1113,9 @@ cmd_read	res	5
 cmd_cogbrk	res	1
 cmd_brk		res	1
 
-		fit	$1F8
+buff		res	16			'data buffer
+
+		fit	overlay_end+1
 '
 '
 '**************
