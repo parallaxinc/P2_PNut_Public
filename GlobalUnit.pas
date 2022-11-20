@@ -26,6 +26,7 @@ const
 
   ObjLimit              = $100000;
   FileLimit             = 32;
+  ParamLimit            = 16;
   InfoLimit             = 1000;
   DebugDataLimit        = $4000;
   DebugStringLimit      = $8000;
@@ -57,6 +58,11 @@ type
     DocLimit:           integer;
     DocLength:          integer;
 
+    Params:             integer;
+    ParamNames:         array[0..ParamLimit*32-1] of byte;
+    ParamTypes:         array[0..ParamLimit-1] of byte;
+    ParamValues:        array[0..ParamLimit-1] of integer;
+
     Obj:                array[0..ObjLimit-1] of byte;
     ObjLength:          integer;
 
@@ -64,6 +70,10 @@ type
     ObjFilenames:       array[0..FileLimit*256-1] of byte;
     ObjFilenamesStart:  array[0..FileLimit-1] of integer;
     ObjFilenamesFinish: array[0..FileLimit-1] of integer;
+    ObjParams:          array[0..FileLimit-1] of integer;
+    ObjParamNames:      array[0..FileLimit*ParamLimit*32-1] of byte;
+    ObjParamTypes:      array[0..FileLimit*ParamLimit-1] of byte;
+    ObjParamValues:     array[0..FileLimit*ParamLimit-1] of integer;
     ObjOffsets:         array[0..FileLimit-1] of integer;
     ObjLengths:         array[0..FileLimit-1] of integer;
     ObjData:            array[0..ObjLimit -1] of byte;
@@ -77,16 +87,6 @@ type
     DatOffsets:         array[0..FileLimit-1] of integer;
     DatLengths:         array[0..FileLimit-1] of integer;
     DatData:            array[0..ObjLimit -1] of byte;
-
-    PreFiles:           integer;
-    PreFilenames:       array[0..FileLimit*256-1] of byte;
-    PreFilenamesStart:  array[0..FileLimit-1] of integer;
-    PreFilenamesFinish: array[0..FileLimit-1] of integer;
-
-    ArcFiles:           integer;
-    ArcFilenames:       array[0..FileLimit*256-1] of byte;
-    ArcFilenamesStart:  array[0..FileLimit-1] of integer;
-    ArcFilenamesFinish: array[0..FileLimit-1] of integer;
 
     InfoCount:          integer;
     InfoStart:          array[0..InfoLimit-1] of integer;

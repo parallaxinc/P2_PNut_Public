@@ -1,5 +1,5 @@
 '**************************************
-'*  Spin2/PASM Debugger - 2022.08.12  *
+'*  Spin2/PASM Debugger - 2022.11.19  *
 '**************************************
 '
 ' Sets up debugger and then launches appended applicaion
@@ -436,15 +436,15 @@ debug_done	rdpin	t1,_txpin_ 	 wc	'wait for tx not busy
 txlong		call	#txword			'send lower word
 		getword	pa,t1,#1		'get upper word
 
-txword		mov	t1,pa			'assemble word as %HHHHHHHH01LLLLLLLL
-		shr	pa,#8-2
+txword		mov	t1,pa			'pack word as %HHHHHHHH01LLLLLLLL for single transmit
+		shr	pa,#8-2			'..improves overlap of memory computations and serial transmits
 		rolbyte	pa,t1,#0
 		bith	pa,#8
 		bitl	pa,#9
 
 		setbyte	txrx,#17,#0		'ready 18-bit mode for fast word transmit
 
-txbyte		rdpin	t2,_txpin_	 wc	'wait until tx not busy
+txbyte		rdpin	t2,_txpin_	wc	'wait until tx not busy
 	if_c	jmp	#txbyte
 
 		wxpin	txrx,_txpin_		'set 18-bit or 8-bit mode
@@ -455,7 +455,7 @@ txbyte		rdpin	t2,_txpin_	 wc	'wait until tx not busy
 
 		bith	_txpin_,#31		'set flag to indicate tx output has occurred
 
-		ret			wcz	'return with preserved flags
+		ret			wcz
 '
 '
 ' Receive long into pb, preserves c/z
@@ -463,10 +463,10 @@ txbyte		rdpin	t2,_txpin_	 wc	'wait until tx not busy
 rxlong		call	#.word
 .word		call	#.byte
 
-.byte		testp	_rxpin_		wc
+.byte		testp	_rxpin_		wc	'wait for rx byte
 	if_nc	jmp	#.byte
 
-		rdpin	pa,_rxpin_
+		rdpin	pa,_rxpin_		'get byte
 		shr	pa,#32-8
 		shr	pb,#8
 		setbyte	pb,pa,#3

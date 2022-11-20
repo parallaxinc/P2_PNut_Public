@@ -2312,6 +2312,7 @@ begin
   PWordArray(@P2.DebugData)[0] := $200;         // reset debug data
   for i := 1 to 255 do PWordArray(@P2.DebugData)[i] := 0;
   P2.ObjStackPtr := 0;
+  P2.Params := 0;
   CompileRecursively(TopFile, Level);           // aborts if error
   ProgressForm.Hide;
   StatusBar.SimpleText := 'Compilation Successful';
@@ -2330,12 +2331,28 @@ end;
 procedure TEditorForm.CompileRecursively(Filename: string; Level: integer);
 var
   i, p, s: integer;
-  ObjFiles, DatFiles: integer;
-  ObjFilename, DatFilename: string;
+
+  Params: integer;
+  ParamNames: array[0..ParamLimit*32-1] of byte;
+  ParamTypes: array[0..ParamLimit-1] of byte;
+  ParamValues: array[0..ParamLimit-1] of integer;
+
+  ObjFiles: integer;
+  ObjFilename: string;
   ObjFilenames: array[0..FileLimit-1] of string[32];
   ObjFilenamesStart: array[0..FileLimit-1] of integer;
   ObjFilenamesFinish: array[0..FileLimit-1] of integer;
+
+  ObjParams: array[0..FileLimit-1] of integer;
+  ObjParamNames: array[0..FileLimit*ParamLimit*32-1] of byte;
+  ObjParamTypes: array[0..FileLimit*ParamLimit-1] of byte;
+  ObjParamValues: array[0..FileLimit*ParamLimit-1] of integer;
+
   ObjTitle: PChar;
+
+  DatFiles: integer;
+  DatFilename: string;
+
   f: file;
 begin
   // update progress form
@@ -2355,15 +2372,32 @@ begin
   // ensure presence of any sub-objects' .obj files
   if ObjFiles > 0 then
   begin
-    // get sub-objects' filename data
+    // save current parameters
+    Params := P2.Params;
+    Move(P2.ParamNames, ParamNames, SizeOf(ParamNames));
+    Move(P2.ParamTypes, ParamTypes, SizeOf(ParamTypes));
+    Move(P2.ParamValues, ParamValues, SizeOf(ParamValues));
+    // save sub-objects' parameters
+    Move(P2.ObjParams, ObjParams, SizeOf(ObjParams));
+    Move(P2.ObjParamNames, ObjParamNames, SizeOf(ObjParamNames));
+    Move(P2.ObjParamTypes, ObjParamTypes, SizeOf(ObjParamTypes));
+    Move(P2.ObjParamValues, ObjParamValues, SizeOf(ObjParamValues));
+    // get sub-objects' filenames
     for i := 0 to ObjFiles-1 do
     begin
       ObjFilenames[i] := PChar(@P2.ObjFilenames[i shl 8]);
       ObjFilenamesStart[i] := P2.ObjFilenamesStart[i];
       ObjFilenamesFinish[i] := P2.ObjFilenamesFinish[i];
     end;
-    // compile any sub-objects' .spin2 files or verify existence of .obj files
+    // compile sub-objects' .spin2 files or verify existence of .obj files
     for i := 0 to ObjFiles-1 do
+    begin
+      // set sub-object's parameters
+      P2.Params := ObjParams[i];
+      Move(ObjParamNames[i*ParamLimit*32], P2.ParamNames, ParamLimit*32);
+      Move(ObjParamTypes[i*ParamLimit], P2.ParamTypes, ParamLimit);
+      Move(ObjParamValues[i*ParamLimit], P2.ParamValues, ParamLimit*4);
+      // compile sub-object
       if (Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.spin2') then CompileRecursively(TopDir + ObjFilenames[i] + '.spin2', 1)
       else if not ((Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.obj')) then
         if (Level <> 3) and FileExists(CurrentDir + ObjFilenames[i] + '.spin2') then CompileRecursively(CurrentDir + ObjFilenames[i] + '.spin2', 2)
@@ -2377,6 +2411,12 @@ begin
             P2.SourceFinish := ObjFilenamesFinish[i];
             CompilerError('Cannot find .spin2 or .obj file for ' + ObjFilenames[i]);
           end;
+    end;
+    // restore current parameters
+    P2.Params := Params;
+    Move(ParamNames, P2.ParamNames, SizeOf(ParamNames));
+    Move(ParamTypes, P2.ParamTypes, SizeOf(ParamTypes));
+    Move(ParamValues, P2.ParamValues, SizeOf(ParamValues));
   end;
   // reload source file and reperform first pass of compilation
   LoadCompilerFile(Filename);

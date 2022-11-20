@@ -43,7 +43,7 @@ const
   key_red               = 6;
   key_magenta           = 7;
   key_yellow            = 8;
-  key_grey              = 9;
+  key_gray              = 9;
 
   key_lut1              = 10;   // color-mode group
   key_lut2              = 11;
@@ -115,17 +115,18 @@ const
   key_signed            = 75;
   key_size              = 76;
   key_spacing           = 77;
-  key_sprite            = 78;
-  key_spritedef         = 79;
-  key_text              = 80;
-  key_textangle         = 81;
-  key_textsize          = 82;
-  key_textstyle         = 83;
-  key_title             = 84;
-  key_trace             = 85;
-  key_trigger           = 86;
-  key_update            = 87;
-  key_window            = 88;
+  key_sparse            = 78;
+  key_sprite            = 79;
+  key_spritedef         = 80;
+  key_text              = 81;
+  key_textangle         = 82;
+  key_textsize          = 83;
+  key_textstyle         = 84;
+  key_title             = 85;
+  key_trace             = 86;
+  key_trigger           = 87;
+  key_update            = 88;
+  key_window            = 89;
 
   TypeName              : array [dis_logic..dis_midi] of string = (
                           'LOGIC',
@@ -189,12 +190,12 @@ const
   clOlive               = $7F7F00;
   clWhite               = $FFFFFF;
   clBlack               = $000000;
-  clGrey                = $404040;
-  clGrey2               = $808080;
-  clGrey3               = $D0D0D0;
+  clGray                = $404040;
+  clGray2               = $808080;
+  clGray3               = $D0D0D0;
   
   DefaultBackColor      = clBlack;
-  DefaultGridColor      = clGrey;
+  DefaultGridColor      = clGray;
   DefaultPlotColor      = clCyan;
   DefaultTextColor      = clWhite;
 
@@ -334,6 +335,7 @@ private
   vLineSize             : integer;
   vDotSize              : integer;
   vDotSizeY             : integer;
+  vSparse               : integer;
   vTextSize             : integer;
   vTextStyle            : integer;
   vOpacity              : byte;
@@ -1827,7 +1829,7 @@ begin
       KeyLutColors;
     key_backcolor:                                    // BACKCOLOR color
       KeyColor(vBackColor);
-    key_color, key_black..key_grey:                   // COLOR color -or- BLACK..GREY {brightness}
+    key_color, key_black..key_gray:                   // COLOR color -or- BLACK..GRAY {brightness}
     begin
       if val <> key_color then Dec(ptr);
       if KeyColor(vPlotColor) then
@@ -2237,6 +2239,8 @@ begin
         vDotSizeY := vDotSize;
         KeyValWithin(vDotSizeY, 1, 256);
       end;
+    key_sparse:
+      KeyColor(vSparse);
     key_lut1..key_rgb24:
       KeyColorMode;
     key_lutcolors:
@@ -2308,7 +2312,20 @@ begin
       for i := 1 to vPackCount do
       begin
         // Plot sample
-        PlotPixel(UnPack(v));
+        if vSparse = -1 then
+          PlotPixel(UnPack(v))                          // normal pixel
+        else
+        begin
+          x := vPixelX * vDotSize + vDotSize shr 1;     // sparse pixel
+          y := vPixelY * vDotSizeY + vDotSizeY shr 1;
+          SmoothShape(x, y,
+                      vDotSize, vDotSizeY,
+                      0, 0, 0, vSparse, 255);
+          SmoothShape(x, y,
+                      vDotSize - vDotSize shr 2, vDotSizeY - vDotSizeY shr 2,
+                      vDotSize, vDotSizeY,
+                      0, TranslateColor(UnPack(v), vColorMode), 255);
+        end;
         if RateCycle and not vUpdate then BitmapToCanvas(0);
         StepTrace;
       end;
@@ -2480,16 +2497,16 @@ var
 begin
   if Clear then for i := 0 to 127 do MidiVelocity[i] := 0;
   Bitmap[0].Canvas.Pen.Width := 1;
-  Bitmap[0].Canvas.Pen.Color := clGrey2;
+  Bitmap[0].Canvas.Pen.Color := clGray2;
   Bitmap[0].Canvas.Brush.Color := clInactiveCaption;
   Bitmap[0].Canvas.FillRect(Rect(0, 0, vWidth, vHeight));
   r := MidiKeySize div 4;
   // draw white keys first
-  Bitmap[0].Canvas.Font.Color := clGrey3;
+  Bitmap[0].Canvas.Font.Color := clGray3;
   for i := MidiKeyFirst to MidiKeyLast do
     if not MidiBlack[i] then MIDI_DrawKey(i, clWhite, vColor[0], r);
   // draw black keys last since they overlap white keys
-  Bitmap[0].Canvas.Font.Color := clGrey2;
+  Bitmap[0].Canvas.Font.Color := clGray2;
   for i := MidiKeyFirst to MidiKeyLast do
     if MidiBlack[i] then MIDI_DrawKey(i, clBlack, vColor[1], r);
   // update display
@@ -2576,7 +2593,7 @@ begin
   Result := False;
   if NextKey then
   begin
-    if not (val in [key_black..key_grey]) then
+    if not (val in [key_black..key_gray]) then
     begin
       Dec(ptr);
       Exit;
@@ -2609,7 +2626,7 @@ begin
   begin
     if NextKey then
     begin
-      if not (val in [key_orange..key_grey]) then
+      if not (val in [key_orange..key_gray]) then
       begin
         Dec(ptr);
         Exit;
@@ -2728,6 +2745,7 @@ begin
   vPolar := False;
   vTwoPi := $100000000;
   vTheta := 0;
+  vSparse := -1;
   vMouseWheel := 0;
   vKeyPress := 0;
   for i := 0 to TopChannel do vLabel[i] := '';
@@ -2754,10 +2772,21 @@ begin
   begin
     ClientWidth := vWidth * vDotSize;
     ClientHeight := vHeight * vDotSizeY;
-    Bitmap[1].Width := vWidth;
-    Bitmap[1].Height := vHeight;
-    Bitmap[0].Width := vWidth;
-    Bitmap[0].Height := vHeight;
+    if (vSparse <> -1) and (vDotSize >= 4) and (vDotSizeY >= 4) then
+    begin
+      Bitmap[1].Width := ClientWidth;
+      Bitmap[1].Height := ClientHeight;
+      Bitmap[0].Width := ClientWidth;
+      Bitmap[0].Height := ClientHeight;
+    end
+    else
+    begin
+      vSparse := -1;
+      Bitmap[1].Width := vWidth;
+      Bitmap[1].Height := vHeight;
+      Bitmap[0].Width := vWidth;
+      Bitmap[0].Height := vHeight;
+    end
   end
   else
   begin
@@ -3293,26 +3322,37 @@ end;
 
 procedure TDebugDisplayForm.ScrollBitmap(x, y: integer);
 var
+  xm, ym: integer;
   src, dst: TRect;
 begin
-  src := Rect(0, 0, vWidth, vHeight);
-  dst := Rect(x, y, vWidth + x, vHeight + y);
+  if vSparse = -1 then
+  begin
+    xm := 1;
+    ym := 1;
+  end
+  else
+  begin
+    xm := vDotSize;
+    ym := vDotSizeY;
+  end;
+  src := Rect(0, 0, vWidth * xm, vHeight * ym);
+  dst := Rect(x * xm, y * ym, (vWidth + x) * xm, (vHeight + y) * ym);
   Bitmap[0].Canvas.CopyRect(dst, Bitmap[0].Canvas, src);
   Bitmap[0].Canvas.Brush.Color := WinRGB(GetBackground);
   if x <> 0 then
   begin
     if x < 0 then
-      dst := Rect(vWidth + x, 0, vWidth, vHeight)
+      dst := Rect((vWidth + x) * xm, 0, vWidth * xm, vHeight * ym)
     else
-      dst := Rect(0, 0, x, vHeight);
+      dst := Rect(0, 0, x * xm, vHeight * ym);
     Bitmap[0].Canvas.FillRect(dst);
   end;
   if y <> 0 then
   begin
     if y < 0 then
-      dst := Rect(0, vHeight + y, vWidth, vHeight)
+      dst := Rect(0, (vHeight + y) * ym, vWidth * xm, vHeight * ym)
     else
-      dst := Rect(0, 0, vWidth, y);
+      dst := Rect(0, 0, vWidth * xm, y * ym);
     Bitmap[0].Canvas.FillRect(dst);
   end;
 end;
@@ -3440,8 +3480,8 @@ var
   xopa, yopa, opa: byte;
 begin
   // ignore bad input
-  if (xc < -SmoothFillMax) or (xc > vWidth + SmoothFillMax) or
-     (yc < -SmoothFillMax) or (yc > vHeight + SmoothFillMax) or
+  if (xc < -SmoothFillMax) or (xc > vBitmapWidth + SmoothFillMax) or
+     (yc < -SmoothFillMax) or (yc > vBitmapHeight + SmoothFillMax) or
      (xs < 1) or (xs > SmoothFillMax) or
      (ys < 1) or (ys > SmoothFillMax) or
      (xro < 0) or (xro > SmoothFillMax shr 1) or
@@ -3617,7 +3657,7 @@ var
   i: integer;
 begin
   // make sure y within bitmap
-  if (y < 0) or (y >= vHeight) then Exit;
+  if (y < 0) or (y >= vBitmapHeight) then Exit;
   // reduce count if x < 0 or x + count >= width
   if (x < 0) then
   begin
@@ -3625,8 +3665,8 @@ begin
     if count < 0 then Exit;
     x := 0;
   end;
-  if x >= vWidth then Exit;
-  if x + count >= vWidth then count := vWidth - 1 - x;
+  if x >= vBitmapWidth then Exit;
+  if x + count >= vBitmapWidth then count := vBitmapWidth - 1 - x;
   // fill pixels in line
   if opacity = $FF then         // fast fill?
     Move(SmoothFillBuff, PByteArray(BitmapLine[y])[x * 3], (count + 1) * 3)
