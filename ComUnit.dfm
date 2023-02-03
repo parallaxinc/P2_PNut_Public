@@ -1,6 +1,6 @@
 object ComForm: TComForm
-  Left = 11
-  Top = 917
+  Left = 5
+  Top = 1087
   Anchors = []
   BorderIcons = [biSystemMenu]
   BorderStyle = bsSingle

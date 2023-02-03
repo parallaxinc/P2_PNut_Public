@@ -3264,9 +3264,14 @@ end;
 function TDebugDisplayForm.AlphaBlend(a, b: integer; x: byte): integer;
 begin
   Result :=
-    (a shr 16 and $FF * x + b shr 16 and $FF * not x + $FF) shr 8 shl 16 or
+    // New gamma-corrected alpha blending
+    Round(Power((Power(a shr 16 and $FF, 2.0) * x + Power(b shr 16 and $FF, 2.0) * (255 - x)) / 256, 0.5)) shl 16 or
+    Round(Power((Power(a shr 08 and $FF, 2.0) * x + Power(b shr 08 and $FF, 2.0) * (255 - x)) / 256, 0.5)) shl 08 or
+    Round(Power((Power(a shr 00 and $FF, 2.0) * x + Power(b shr 00 and $FF, 2.0) * (255 - x)) / 256, 0.5)) shl 00;
+    // Old linear alpha blending
+{   (a shr 16 and $FF * x + b shr 16 and $FF * not x + $FF) shr 8 shl 16 or
     (a shr 08 and $FF * x + b shr 08 and $FF * not x + $FF) shr 8 shl 08 or
-    (a shr 00 and $FF * x + b shr 00 and $FF * not x + $FF) shr 8 shl 00;
+    (a shr 00 and $FF * x + b shr 00 and $FF * not x + $FF) shr 8 shl 00; }
 end;
 
 procedure TDebugDisplayForm.DrawLineDot(x, y, color: integer; first: boolean);
@@ -3676,7 +3681,10 @@ begin
     dst := @PByteArray(BitmapLine[y])[x * 3];
     for i := 1 to (count + 1) * 3 do
     begin
-      dst^ := (dst^ * not opacity + src^ * opacity + $FF) shr 8;
+      // New gamma-corrected alpha blending
+      dst^ := Round(Power((Power(dst^, 2.0) * (255 - opacity) + Power(src^, 2.0) * opacity) / 256, 0.5));
+      // Old linear alpha blending
+{     dst^ := (dst^ * not opacity + src^ * opacity + $FF) shr 8; }
       Inc(dst);
       Inc(src);
     end;
@@ -3699,9 +3707,14 @@ begin
   end
   else
   begin
-    p^ := ((p^ * not opacity + (SmoothFillColor shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
+    // New gamma-corrected alpha blending
+    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 00 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 08 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 16 and $FF, 2.0) * opacity) / 256, 0.5));
+    // Old linear alpha blending
+{   p^ := ((p^ * not opacity + (SmoothFillColor shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
     p^ := ((p^ * not opacity + (SmoothFillColor shr 08 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (SmoothFillColor shr 16 and $FF) * opacity) + $FF) shr 8;
+    p^ := ((p^ * not opacity + (SmoothFillColor shr 16 and $FF) * opacity) + $FF) shr 8; }
   end;
 end;
 
@@ -3891,9 +3904,14 @@ begin
   end
   else
   begin
-    p^ := ((p^ * not opacity + (color shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
+    // New gamma-corrected alpha blending
+    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(color shr 00 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(color shr 08 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(color shr 16 and $FF, 2.0) * opacity) / 256, 0.5));
+    // Old linear alpha blending
+{   p^ := ((p^ * not opacity + (color shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
     p^ := ((p^ * not opacity + (color shr 08 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (color shr 16 and $FF) * opacity) + $FF) shr 8;
+    p^ := ((p^ * not opacity + (color shr 16 and $FF) * opacity) + $FF) shr 8; }
   end;
 end;
 

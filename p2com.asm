@@ -670,8 +670,6 @@ count		type_field		;	FIELD
 count		type_size		;	BYTE, WORD, LONG
 count		type_size_fit		;	BYTEFIT, WORDFIT
 count		type_fvar		;	FVAR, FVARS
-count		type_precompile		;	PRECOMPILE
-count		type_archive		;	ARCHIVE
 count		type_file		;	FILE
 count		type_if			;	IF
 count		type_ifnot		;	IFNOT
@@ -1378,7 +1376,6 @@ count		block_var
 count		block_pub
 count		block_pri
 count		block_dat
-count		block_dev
 ;
 ;
 ; Directives
@@ -2446,7 +2443,7 @@ _compile1:	mov	[error],1		;init error to true
 
 		call	determine_mode		;determine compiler mode (Spin/PASM)
 
-		call	compile_con_blocks	;compile con blocks
+		call	compile_con_blocks_1st	;compile con blocks, 1st pass
 		call	compile_obj_blocks_id	;compile obj blocks' id's
 		call	compile_sub_blocks_id	;compile sub blocks' id's
 		call	compile_dat_blocks_fn	;compile dat blocks' filenames
@@ -2461,6 +2458,7 @@ _compile2:	mov	[error],1		;init error to true
 
 		call	compile_obj_symbols	;compile obj symbols
 		call	determine_clock		;determine clock settings
+		call	compile_con_blocks_2nd	;compile con blocks, 2nd pass, plus obj/clock symbols
 		call	determine_bauds_pins	;determine bauds and debug pins
 		call	compile_var_blocks	;compile var blocks
 		call	compile_dat_blocks	;compile dat blocks
@@ -3009,9 +3007,6 @@ determine_mode:	call	reset_element
 		cmp	bl,block_con		;if CON, ignore
 		je	@@scan
 
-		cmp	bl,block_dev		;if DEV, ignore
-		je	@@scan
-
 		cmp	bl,block_dat		;if not DAT, must be OBJ/VAR/PUB/PRI, set Spin mode
 		jne	@@spin
 
@@ -3028,9 +3023,22 @@ determine_mode:	call	reset_element
 ;
 ; Compile con blocks
 ;
+compile_con_blocks_1st:
+
+		mov	al,001b			;resolve initial symbols, first pass
+		call	compile_con_blocks
+		mov	al,101b			;resolve more symbols (%101 avoids operand mode %x1x)
+		jmp	compile_con_blocks
+
+compile_con_blocks_2nd:
+
+		mov	al,101b			;resolve more symbols, incorporates obj and clock symbols
+		call	compile_con_blocks
+		mov	al,000b			;resolve any remaining symbols, last pass
+
 compile_con_blocks:
 
-		mov	[@@pass],0		;set pass
+		mov	[@@pass],al		;set pass
 
 @@nextpass:	call	reset_element		;reset element
 		jmp	@@autoblock
@@ -3064,9 +3072,9 @@ compile_con_blocks:
 		jmp	@@nextblock		;resume scan for next con block
 
 
-@@constant:	cmp	[@@pass],0		;constant
+@@constant:	cmp	[@@pass],001b		;constant, may be an already-assigned symbol
 		je	error_eaucnop		;if first pass, error
-		mov	[@@assign_flag],0	;second pass, clear assign flag
+		mov	[@@assign_flag],0	;not first pass, clear assign flag
 		mov	[@@assign_type],al	;save assign type and value for verification
 		mov	[@@assign_value],ebx
 
@@ -3092,25 +3100,26 @@ compile_con_blocks:
 		jmp	error_eelcoeol
 
 @@equal:	mov	bl,[@@pass]		;symbol = value
-		xor	bl,1			;if first pass, try to resolve
-		call	try_value		;if second pass, must resolve
+		call	try_value		;try to resolve value, errors if unresolved on last pass
 		rcl	[@@float],1		;if float, set flag to 1
 		test	[exp_flags],100b	;resolved?
-		jz	@@assign		;if resolved, assign value
+		jz	@@assign		;if resolved, assign value to symbol
 		jmp	@@next			;unresolved, next
 
-@@enumx:	call	@@tryvalueint		;symbol[value], assign enumeration
+@@enumx:	mov	bl,[@@pass]		;symbol[value], assign enumeration
+		call	try_value_int		;try to resolve value, errors if unresolved on last pass
 		call	get_rightb
-		test	[exp_flags],100b
+		test	[exp_flags],100b	;if [value] resolved, check if current enumeration is valid
 		jz	@@enumv
-		mov	[@@enum_valid],0
+		mov	[@@enum_valid],0	;unresolved, cancel flag, next
 		jmp	@@next
 
-@@enuma:	call	back_element		;symbol, assign enumeration
+@@enuma:	call	back_element		;isolated symbol, back up before comma or eol
 		mov	ebx,1
 @@enumv:	cmp	[@@enum_valid],0	;if enumeration invalid, next
 		je	@@next
-		mov	eax,ebx			;get enumeration value and update
+
+		mov	eax,ebx			;enumeration valid, get current value and assign to symbol
 		mul	[@@enum_step]
 		mov	ebx,eax
 		xchg	[@@enum_value],ebx
@@ -3147,7 +3156,7 @@ compile_con_blocks:
 		call	enter_symbol2_print
 		jmp	@@next
 
-@@verify:	push	[inf_start]		;verify assign value and type (second pass)
+@@verify:	push	[inf_start]		;verify assign value and type (post-first pass)
 		pop	[source_start]
 		push	[inf_finish]
 		pop	[source_finish]
@@ -3160,16 +3169,20 @@ compile_con_blocks:
 		jmp	@@next
 
 
-@@pound:	call	@@tryvalueint		;#value, set enumeration
-		mov	[@@enum_valid],0
+@@pound:	mov	bl,[@@pass]		;#value, set enumeration start
+		call	try_value_int		;try to resolve value, errors if unresolved on last pass
+		mov	[@@enum_valid],0	;clear flag
+		test	[exp_flags],100b	;if resolved, set flag, value, and default step
 		jnz	@@poundleftb
 		mov	[@@enum_valid],1
 		mov	[@@enum_value],ebx
 		mov	[@@enum_step],1
 @@poundleftb:	call	check_leftb		;check for [step]
 		jne	@@next
-		call	@@tryvalueint
-		mov	[@@enum_step],ebx
+		mov	bl,[@@pass]		;try to get step value
+		call	try_value_int		;errors if unresolved on last pass
+		mov	[@@enum_step],ebx	;save step value
+		test	[exp_flags],100b	;if unresolved, cancel flag
 		jz	@@poundrightb
 		mov	[@@enum_valid],0
 @@poundrightb:	call	get_rightb
@@ -3180,18 +3193,7 @@ compile_con_blocks:
 		call	get_element		;comma, get next element, sameline
 		jmp	@@sameline
 
-@@done:		inc	[@@pass]		;another pass?
-		cmp	[@@pass],1
-		je	@@nextpass
-
-		ret
-
-
-@@tryvalueint:	mov	bl,[@@pass]		;try to get int value
-		xor	bl,1
-		call	try_value_int
-		test	[exp_flags],100b	;z=0 if unresolved
-		ret
+@@done:		ret
 
 
 @@checkparam:	push	ebx			;if symbol is a parameter, substitute the parameter value
@@ -3225,7 +3227,7 @@ dbx		@@assign_type
 ddx		@@assign_value
 ;
 ;
-; Compile obj blocks - id and filenames only
+; Compile obj blocks - get id's, filenames, and parameters
 ;
 compile_obj_blocks_id:
 
@@ -5802,7 +5804,7 @@ determine_bauds_pins:
 		ret
 
 
-@@hostsymbol:	call	check_debug_symbol		;check for host-side symbol
+@@hostsymbol:	call	check_debug_symbol	;check for host-side symbol
 		jnc	@@hostsymbolok
 		mov	ebx,ecx
 @@hostsymbolok:	mov	[edi],ebx
@@ -7724,7 +7726,8 @@ try_value:	mov	bh,0			;either integer or float allowed
 
 get_value_int:	mov	bl,0			;must resolve
 try_value_int:	mov	bh,1			;only integer allowed
-gt_value:	mov	[exp_flags],bl		;set flags
+gt_value:	and	bl,11b			;clear undefined flag in bl.2
+		mov	[exp_flags],bl		;set flags
 
 		push	eax
 		push	ecx
@@ -16622,7 +16625,6 @@ automatic_symbols:
 	sym	type_block,		block_pub,	'PUB'
 	sym	type_block,		block_pri,	'PRI'
 	sym	type_block,		block_dat,	'DAT'
-	sym	type_block,		block_dev,	'DEV'
 
 	sym	type_field,		0,		'FIELD'		;field
 
@@ -16636,9 +16638,7 @@ automatic_symbols:
 	sym	type_fvar,		0,		'FVAR'		;fvar
 	sym	type_fvar,		1,		'FVARS'
 
-	sym	type_precompile,	0,		'PRECOMPILE'	;file-related
-	sym	type_archive,		0,		'ARCHIVE'
-	sym	type_file,		0,		'FILE'
+	sym	type_file,		0,		'FILE'		;file-related
 
 	sym	type_if,		0,		'IF'		;high-level structures
 	sym	type_ifnot,		0,		'IFNOT'

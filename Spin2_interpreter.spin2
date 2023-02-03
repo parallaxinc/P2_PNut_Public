@@ -305,18 +305,17 @@ repvarl		setq	#3-1		'pop address/terminal/delta into a/b/c
 
 		add	x,c		'add delta into current
 
+		alti	wr		'write variable
+dcall		long	0		'(pipeline spacer)
+
 		testb	c,#31	wz	'check for out-of-bounds
 	if_nz	cmps	b,x	wc
 	if_z	cmps	x,b	wc
 
-	if_c	jmp	#pop1		'if out-of-bounds, pop stack, continue
+	if_nc	add	ptra,#3*4	'if not out-of-bounds, unpop data and loop
+	if_nc	jmp	#absjmp
 
-		alti	wr		'not out-of-bounds, write variable
-dcall		long	0		'(pipeline spacer)
-
-		add	ptra,#3*4	'unpop data
-
-		jmp	#absjmp		'loop
+	_ret_	popa	x		'out-of-bounds, pop stack, continue
 '
 '
 ' PINW(pins,val)			(9 longs, must be in regs)
@@ -1137,8 +1136,8 @@ casev		rfvar	a		'read address
 		sub	w,x	wz	'value = target?
 	if_nz	ret			'exit if not equal
 
-reljmp		add	a,pb
-	_ret_	rdfast	#0,a
+reljmp		add	a,pb		'add relative address
+	_ret_	rdfast	#0,a		'branch
 
 absjmp		add	a,pbase		'add pbase
 	_ret_	rdfast	#0,a		'branch to case code
@@ -2233,7 +2232,7 @@ qsin_		setq	#2-1			'pop rho and theta, open top of stack
 '
 rotxy_		setq	#2-1			'pop x and y for ROTXY
 polxy_		rdlong	y,--ptra		'pop r/x for POLXY/XYPOL
-		cmp	pa,bc_polxy	wcz	'flags differentiate ROTXY/POLXY/XYPOL
+		cmp	pa,#bc_polxy	wcz	'flags differentiate ROTXY/POLXY/XYPOL
 		rep	#99,#1			'use REP to stall interrupts to protect cordic operation until _ret_
 	if_b	setq	z			'if ROTXY, do SETQ
 	if_be	qrotate	y,x			'if ROTXY/POLXY, do QROTATE

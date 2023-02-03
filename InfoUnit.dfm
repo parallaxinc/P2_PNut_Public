@@ -1,6 +1,6 @@
 object InfoForm: TInfoForm
-  Left = 12
-  Top = 1988
+  Left = 5
+  Top = 2084
   BorderStyle = bsSingle
   Caption = 'Object Info'
   ClientHeight = 405
