@@ -2294,9 +2294,9 @@ end;
 procedure TDebuggerForm.BlendPixel(var p:PByte; a, b: integer; alpha, shade: byte);
 begin
   // New gamma-corrected alpha blending
-  p^ := Round(Power((Power(a shr 00 and $FF, 2.0) * (255 - alpha) + Power(b shr 00 and $FF, 2.0) * alpha) / 256, 1 / 0.5)); Inc(p);
-  p^ := Round(Power((Power(a shr 08 and $FF, 2.0) * (255 - alpha) + Power(b shr 08 and $FF, 2.0) * alpha) / 256, 1 / 0.5)); Inc(p);
-  p^ := Round(Power((Power(a shr 16 and $FF, 2.0) * (255 - alpha) + Power(b shr 16 and $FF, 2.0) * alpha) / 256, 1 / 0.5)); Inc(p);
+  p^ := Round(Power((Power(a shr 00 and $FF, 2.0) * (255 - alpha) + Power(b shr 00 and $FF, 2.0) * alpha) / 256, 0.5)); Inc(p);
+  p^ := Round(Power((Power(a shr 08 and $FF, 2.0) * (255 - alpha) + Power(b shr 08 and $FF, 2.0) * alpha) / 256, 0.5)); Inc(p);
+  p^ := Round(Power((Power(a shr 16 and $FF, 2.0) * (255 - alpha) + Power(b shr 16 and $FF, 2.0) * alpha) / 256, 0.5)); Inc(p);
   // Old linear alpha blending
 { p^ := Smaller((a shr 00 and $FF * not alpha + b shr 00 and $FF * alpha + $FF) shr 8 + shade, $FF); Inc(p);
   p^ := Smaller((a shr 08 and $FF * not alpha + b shr 08 and $FF * alpha + $FF) shr 8 + shade, $FF); Inc(p);
