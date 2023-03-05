@@ -20,7 +20,7 @@ uses
 
 begin
   Application.Initialize;
-  Application.Title := 'PNut v38';
+  Application.Title := 'PNut v39';
   Application.CreateForm(TEditorForm, EditorForm);
   Application.CreateForm(TPrintForm, PrintForm);
   Application.CreateForm(TPrintStatusForm, PrintStatusForm);

@@ -14,6 +14,13 @@ const
   MaxFontSize = 72;
   ClickTime = 500;
 
+  cObjOn = True;       // Compile flags
+  cObjOff = False;
+  cListOn = True;
+  cListOff = False;
+  cDocOn = True;
+  cDocOff = False;
+
 type
   TEditorForm = class(TForm)
 
@@ -55,6 +62,7 @@ type
         RunDebugToggleItem: TMenuItem;
                 RunN1: TMenuItem;
         RunAutoSaveItem: TMenuItem;
+        RunGenerateBinaryItem: TMenuItem;
                 RunN2: TMenuItem;
         RunGetHardwareItem: TMenuItem;
         RunChangePortItem: TMenuItem;
@@ -117,6 +125,7 @@ type
   procedure RunCompileProgramDebug(Sender: TObject);
   procedure RunDebugToggle(Sender: TObject);
   procedure RunAutoSave(Sender: TObject);
+  procedure RunGenerateBinary(Sender: TObject);
   procedure RunGetHardware(Sender: TObject);
   procedure RunChangePort(Sender: TObject);
   procedure RunComposeRom(Sender: TObject);
@@ -183,8 +192,8 @@ type
   function  Replace: boolean;
 
   procedure SetDirectories;
-  procedure Compile;
-  procedure CompileRecursively(Filename: string; Level: integer);
+  procedure Compile(cObj, cList, cDoc: boolean);
+  procedure CompileRecursively(Filename: string; Level: integer; cObj, cList, cDoc: boolean);
   procedure CompilerError(ErrorMsg: string);
   procedure LoadCompilerFile(Filename: string);
   procedure SaveFile(Filename: string; Start: Pointer; Bytes: integer);
@@ -366,6 +375,9 @@ begin
       TopFilename := ExpandFilename(ParamStr(1));
     LoadEditorFile(TopFilename);
     if (ParamCount = 2) and ( (ParamStr(2) = '-c' ) or
+                              (ParamStr(2) = '-cd') or
+                              (ParamStr(2) = '-cf') or
+                              (ParamStr(2) = '-cb') or
                               (ParamStr(2) = '-r' ) or
                               (ParamStr(2) = '-rd') or
                               (ParamStr(2) = '-f' ) or
@@ -373,19 +385,22 @@ begin
     begin
       BatchMode := True;
       try
-        P2.DebugMode := (ParamStr(2) = '-rd') or (ParamStr(2) = '-fd');
-        Compile; // aborts if error
+        P2.DebugMode := (ParamStr(2) = '-cd') or
+                        (ParamStr(2) = '-cb') or
+                        (ParamStr(2) = '-rd') or
+                        (ParamStr(2) = '-fd');
+        Compile(cObjOn, cListOff, cDocOff); // aborts if error
       except
         WriteErrorFile(CurrentFilename + ':' + IntToStr(GetErrorLine) + ':error:' + P2.ErrorMsg);
         ExitCode := 1;
         Close;
         Exit;
       end;
-      if ParamStr(2) <> '-c' then
       try
+        RunGenerateBinaryItem.Checked := True;
         ComposeRAM(
-          (ParamStr(2) = '-f') or (ParamStr(2) = '-fd'),
-          (ParamStr(2) = '-r') or (ParamStr(2) = '-rd') or (ParamStr(2) = '-f') or (ParamStr(2) = '-fd'));
+          (ParamStr(2) = '-cf') or (ParamStr(2) = '-cb') or (ParamStr(2) = '-f') or (ParamStr(2) = '-fd'),
+          (ParamStr(2) = '-r')  or (ParamStr(2) = '-rd') or (ParamStr(2) = '-f') or (ParamStr(2) = '-fd'));
       except
         WriteErrorFile('serial_error');
         ExitCode := 1;
@@ -755,7 +770,7 @@ begin
   else
   begin
     P2.DebugMode := False;
-    Compile;  // aborts if error
+    Compile(cObjOff, cListOn, cDocOff);  // aborts if error
     SetExtFileMode('lst', @ListBuffer, ListLimit, P2.ListLength);
     FileListToggleItem.Checked := True;
     Hint := 'List Mode - Type Ctrl+L to return to source';
@@ -768,7 +783,7 @@ begin
   else
   begin
     P2.DebugMode := True;
-    Compile;  // aborts if error
+    Compile(cObjOff, cListOn, cDocOff);  // aborts if error
     SetExtFileMode('lst', @ListBuffer, ListLimit, P2.ListLength);
     FileListToggleDebugItem.Checked := True;
     Hint := 'List Mode - Type Ctrl+L to return to source';
@@ -781,7 +796,7 @@ begin
   else
   begin
     P2.DebugMode := False;
-    Compile;  // aborts if error
+    Compile(cObjOff, cListOff, cDocOn);  // aborts if error
     SetExtFileMode('txt', @DocBuffer, DocLimit, P2.DocLength);
     FileDocToggleItem.Checked := True;
     Hint := 'Documentation Mode - Type Ctrl+D to return to source';
@@ -893,7 +908,7 @@ end;
 procedure TEditorForm.RunCompile(Sender: TObject);
 begin
   P2.DebugMode := False;
-  Compile; // aborts if error
+  Compile(cObjOff, cListOff, cDocOff); // aborts if error
   ComposeRAM(False, False);
   InfoForm.ShowModal;
 end;
@@ -901,7 +916,7 @@ end;
 procedure TEditorForm.RunCompileDebug(Sender: TObject);
 begin
   P2.DebugMode := True;
-  Compile; // aborts if error
+  Compile(cObjOff, cListOff, cDocOff); // aborts if error
   ComposeRAM(False, False);
   InfoForm.ShowModal;
 end;
@@ -912,7 +927,7 @@ begin
   DebugPostActive := True;
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := False;
-  Compile; // aborts if error
+  Compile(cObjOff, cListOff, cDocOff); // aborts if error
   ComposeRAM(False, True)
 end;
 
@@ -922,7 +937,7 @@ begin
   DebugPostActive := True;
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := True;
-  Compile; // aborts if error
+  Compile(cObjOff, cListOff, cDocOff); // aborts if error
   ComposeRAM(False, True)
 end;
 
@@ -932,7 +947,7 @@ begin
   DebugPostActive := True;
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := False;
-  Compile; // aborts if error
+  Compile(cObjOff, cListOff, cDocOff); // aborts if error
   ComposeRAM(True, True);
 end;
 
@@ -942,7 +957,7 @@ begin
   DebugPostActive := True;
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := True;
-  Compile; // aborts if error
+  Compile(cObjOff, cListOff, cDocOff); // aborts if error
   ComposeRAM(True, True);
 end;
 
@@ -956,6 +971,11 @@ end;
 procedure TEditorForm.RunAutoSave(Sender: TObject);
 begin
   RunAutoSaveItem.Checked := not RunAutoSaveItem.Checked;
+end;
+
+procedure TEditorForm.RunGenerateBinary(Sender: TObject);
+begin
+  RunGenerateBinaryItem.Checked := not RunGenerateBinaryItem.Checked;
 end;
 
 procedure TEditorForm.RunGetHardware(Sender: TObject);
@@ -974,7 +994,7 @@ begin
   SetDirectories;
   LoadEditorFile(LibraryDir + 'ROM_Booter.spin2');
   P2.DebugMode := False;
-  Compile; //aborts if error
+  Compile(cObjOn, cListOff, cDocOff); //aborts if error
   FileNew(Sender);
   ComposeROM;
 end;
@@ -2282,7 +2302,7 @@ begin
   LibraryDir := IncludeTrailingPathDelimiter(ExtractFileDir(Application.ExeName));
 end;
 
-procedure TEditorForm.Compile;
+procedure TEditorForm.Compile(cObj, cList, cDoc: boolean);
 var
   CurrentPos, CurrentTop, CurrentPan, Level, i: integer;
   CurrentFile: string;
@@ -2313,7 +2333,9 @@ begin
   for i := 1 to 255 do PWordArray(@P2.DebugData)[i] := 0;
   P2.ObjStackPtr := 0;
   P2.Params := 0;
-  CompileRecursively(TopFile, Level);           // aborts if error
+  ObjFilePtr := 0;
+  ObjFileCount := 0;
+  CompileRecursively(TopFile, Level, cObj, cList, cDoc);      // aborts if error
   ProgressForm.Hide;
   StatusBar.SimpleText := 'Compilation Successful';
   // reload current file
@@ -2328,9 +2350,9 @@ begin
   ShowCursor;
 end;
 
-procedure TEditorForm.CompileRecursively(Filename: string; Level: integer);
+procedure TEditorForm.CompileRecursively(Filename: string; Level: integer; cObj, cList, cDoc: boolean);
 var
-  i, p, s: integer;
+  i, j, p, s: integer;
 
   Params: integer;
   ParamNames: array[0..ParamLimit*32-1] of byte;
@@ -2342,6 +2364,7 @@ var
   ObjFilenames: array[0..FileLimit-1] of string[32];
   ObjFilenamesStart: array[0..FileLimit-1] of integer;
   ObjFilenamesFinish: array[0..FileLimit-1] of integer;
+  ObjFileIndex: array[0..FileLimit-1] of integer;
 
   ObjParams: array[0..FileLimit-1] of integer;
   ObjParamNames: array[0..FileLimit*ParamLimit*32-1] of byte;
@@ -2369,7 +2392,7 @@ begin
   if P2.PasmMode and (P2.ObjStackPtr > 1) then CompilerError(Filename + ' is a PASM file and cannot be used as a Spin2 object'); // aborts if error
   ObjFiles := P2.ObjFiles;
   DatFiles := P2.DatFiles;
-  // ensure presence of any sub-objects' .obj files
+  // generate any sub-objects' obj files
   if ObjFiles > 0 then
   begin
     // save current parameters
@@ -2389,7 +2412,7 @@ begin
       ObjFilenamesStart[i] := P2.ObjFilenamesStart[i];
       ObjFilenamesFinish[i] := P2.ObjFilenamesFinish[i];
     end;
-    // compile sub-objects' .spin2 files or verify existence of .obj files
+    // compile sub-objects' .spin2 files to generate obj files
     for i := 0 to ObjFiles-1 do
     begin
       // set sub-object's parameters
@@ -2398,19 +2421,22 @@ begin
       Move(ObjParamTypes[i*ParamLimit], P2.ParamTypes, ParamLimit);
       Move(ObjParamValues[i*ParamLimit], P2.ParamValues, ParamLimit*4);
       // compile sub-object
-      if (Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.spin2') then CompileRecursively(TopDir + ObjFilenames[i] + '.spin2', 1)
-      else if not ((Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.obj')) then
-        if (Level <> 3) and FileExists(CurrentDir + ObjFilenames[i] + '.spin2') then CompileRecursively(CurrentDir + ObjFilenames[i] + '.spin2', 2)
-        else if not ((Level <> 3) and FileExists(CurrentDir + ObjFilenames[i] + '.obj')) then
-          if FileExists(LibraryDir + ObjFilenames[i] + '.spin2') then CompileRecursively(LibraryDir + ObjFilenames[i] + '.spin2', 3)
-          else if not FileExists(LibraryDir + ObjFilenames[i] + '.obj') then
-          // error, neither .spin2 nor .obj file found
-          begin
-            LoadCompilerFile(Filename);
-            P2.SourceStart := ObjFilenamesStart[i];
-            P2.SourceFinish := ObjFilenamesFinish[i];
-            CompilerError('Cannot find .spin2 or .obj file for ' + ObjFilenames[i]);
-          end;
+      if (Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.spin2') then
+        CompileRecursively(TopDir + ObjFilenames[i] + '.spin2', 1, cObjOff, cListOff, cDocOff)
+      else if (Level <> 3) and FileExists(CurrentDir + ObjFilenames[i] + '.spin2') then
+        CompileRecursively(CurrentDir + ObjFilenames[i] + '.spin2', 2, cObjOff, cListOff, cDocOff)
+      else if FileExists(LibraryDir + ObjFilenames[i] + '.spin2') then
+        CompileRecursively(LibraryDir + ObjFilenames[i] + '.spin2', 3, cObjOff, cListOff, cDocOff)
+      else
+      // error, .spin2 file not found
+      begin
+        LoadCompilerFile(Filename);
+        P2.SourceStart := ObjFilenamesStart[i];
+        P2.SourceFinish := ObjFilenamesFinish[i];
+        CompilerError('Cannot find ' + ObjFilenames[i] + '.spin2');
+      end;
+      // get sub-object's obj file index
+      ObjFileIndex[i] := ObjFileCount - 1;
     end;
     // restore current parameters
     P2.Params := Params;
@@ -2427,26 +2453,12 @@ begin
   if ObjFiles > 0 then
     for i := 0 to ObjFiles-1 do
     begin
-      ObjFilename := ObjFilenames[i] + '.obj';
-      if (Level = 1) and FileExists(TopDir + ObjFilename) then ObjFilename := TopDir + ObjFilename
-      else if (Level <> 3) and FileExists(CurrentDir + ObjFilename) then ObjFilename := CurrentDir + ObjFilename
-      else ObjFilename := LibraryDir + ObjFilename;
-      AssignFile(f, ObjFilename);
-      try
-        try
-          Reset(f, 1);
-          s := FileSize(f);
-          if p + s > ObjLimit then CompilerError('OBJ files exceed ' + IntToStr(ObjLimit div 1024) + 'k limit');
-          BlockRead(f, P2.ObjData[p], s);
-          P2.ObjOffsets[i] := p;
-          P2.ObjLengths[i] := s;
-          p := p + s;
-        except
-          CompilerError('Failure reading file ' + ObjFilename); //aborts if error
-        end;
-      finally
-        CloseFile(f);
-      end;
+      j := ObjFileIndex[i];
+      s := ObjFileLength[j];
+      Move(ObjFileBuff[ObjFileOffset[j]], P2.ObjData[p], s);
+      P2.ObjOffsets[i] := p;
+      P2.ObjLengths[i] := s;
+      p := p + s;
     end;
   // load any data files
   p := 0;
@@ -2479,10 +2491,18 @@ begin
   StrCopy(ObjTitle, PChar(ExtractFilename(Filename)));
   P2Compile2;
   if P2.Error then CompilerError(P2.ErrorMsg); //aborts if error
-  // save documentation and obj files
-  SaveFile(ExtFilename(CurrentFilename, 'txt'), P2.Doc, P2.DocLength);
-  SaveFile(ExtFilename(CurrentFilename, 'obj'), @P2.Obj, P2.ObjLength);
-  SaveFile(ExtFilename(CurrentFilename, 'lst'), p2.List, P2.ListLength);
+  // Save obj file into memory
+  if ObjFilePtr + P2.ObjLength > ObjLimit then
+    CompilerError('OBJ data exceeds ' + IntToStr(ObjLimit div 1024) + 'k limit');
+  Move(P2.Obj, ObjFileBuff[ObjFilePtr], P2.ObjLength);
+  ObjFileOffset[ObjFileCount] := ObjFilePtr;
+  ObjFileLength[ObjFileCount] := P2.ObjLength;
+  Inc(ObjFilePtr, P2.ObjLength);
+  Inc(ObjFileCount);
+  // save obj/list/doc file(s), only happens at top level
+  if cList then SaveFile(ExtFilename(CurrentFilename, 'lst'), P2.List, P2.ListLength);
+  if cDoc then SaveFile(ExtFilename(CurrentFilename, 'txt'), P2.Doc, P2.DocLength);
+  if cObj then SaveFile(ExtFilename(CurrentFilename, 'obj'), @P2.Obj, P2.ObjLength);
   // decrement stack pointer
   Dec(P2.ObjStackPtr);
 end;
@@ -2542,21 +2562,17 @@ begin
   if s > HubLimit then
     CompilerError('Program requirement exceeds ' + IntToStr(HubLimit div 1024)
       + 'KB hub RAM by ' + IntToStr(s - HubLimit) + ' bytes');  //aborts if error
-  // save .bin file
-  SaveFile(ExtFilename(CurrentFilename, 'bin'), @P2.Obj, P2.ObjLength);
   // insert debugger?
   if P2.DebugMode then
   begin
     P2InsertDebugger;
     if P2.Error then CompilerError(P2.ErrorMsg);  //aborts if error
-    SaveFile(ExtFilename(CurrentFilename, 'bin2'), @P2.Obj, P2.ObjLength);
   end;
   // insert clock setter?
   if not P2.DebugMode and P2.PasmMode and (P2.ClkMode <> 0) then
   begin
     P2InsertClockSetter;
     if P2.Error then CompilerError(P2.ErrorMsg);  //aborts if error
-    SaveFile(ExtFilename(CurrentFilename, 'bin2'), @P2.Obj, P2.ObjLength);
   end;
   // insert flash loader?
   if ProgramFlash then
@@ -2567,6 +2583,9 @@ begin
     P2InsertFlashLoader;
     if P2.Error then CompilerError(P2.ErrorMsg);  //aborts if error
   end;
+  // save binary file?
+  if RunGenerateBinaryItem.Checked then
+    SaveFile(ExtFilename(CurrentFilename, 'bin'), @P2.Obj, P2.ObjLength);
   // download to RAM?
   if DownloadToRAM then LoadHardware;
 end;

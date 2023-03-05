@@ -37,6 +37,7 @@ const
   DocLimit              = 5000000;
 
   ObjStackLimit         = 16;
+  ObjFileLimit          = FileLimit * ObjStackLimit;
 
 type
   TP2 = packed record
@@ -166,6 +167,12 @@ var
   SourceBuffer       : array[0..SourceLimit] of byte; // +1 allows 0 end byte
   ListBuffer         : array[0..ListLimit] of byte; // +1 allows end reading
   DocBuffer          : array[0..DocLimit] of byte; // +1 allows end reading
+
+  ObjFilePtr         : integer;
+  ObjFileBuff        : array[0..ObjLimit] of byte;
+  ObjFileCount       : integer;
+  ObjFileOffset      : array[0..ObjFileLimit-1] of integer;
+  ObjFileLength      : array[0..ObjFileLimit-1] of integer;
 
   FontName           : string;
   FontSize           : integer;
