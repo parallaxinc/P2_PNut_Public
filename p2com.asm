@@ -8,8 +8,8 @@
 ;*		  Version 0.1			*
 ;*						*
 ;*	     Written by Chip Gracey		*
-;*	 (C) 2006-2022 by Parallax, Inc.	*
-;*	    Last Updated: 2022/11/19		*
+;*	 (C) 2006-2023 by Parallax, Inc.	*
+;*	    Last Updated: 2023/09/21		*
 ;*						*
 ;************************************************
 ;
@@ -69,7 +69,7 @@ subs_limit		=	1024
 objs_limit		=	1024
 distiller_limit		=	4000h
 
-inline_limit		=	122h
+inline_limit		=	120h
 mrecv_reg		=	1D2h
 msend_reg		=	1D3h
 pasm_regs		=	1D8h
@@ -680,13 +680,15 @@ count		type_case		;	CASE
 count		type_case_fast		;	CASE_FAST
 count		type_other		;	OTHER
 count		type_repeat		;	REPEAT
-count		type_repeat_var		;	REPEAT var   - different QUIT method
-count		type_repeat_count	;	REPEAT count - different QUIT method
+count		type_repeat_var		;	REPEAT var		- different QUIT method
+count		type_repeat_count	;	REPEAT count		- different QUIT method
+count		type_repeat_count_var	;	REPEAT count WITH var	- different QUIT method
 count		type_while		;	WHILE
 count		type_until		;	UNTIL
 count		type_from		;	FROM
 count		type_to			;	TO
 count		type_step		;	STEP
+count		type_with		;	WITH
 count		type_i_next_quit	;	NEXT/QUIT
 count		type_i_return		;	RETURN
 count		type_i_abort		;	ABORT
@@ -937,7 +939,8 @@ counti		bc_read_local_0_15	,16
 counti		bc_write_local_0_15	,16
 
 
-countn		bc_repeat_var_init_1	,7Bh	;variable operator bytecodes
+countn		bc_repeat_var_init_n	,7Ah	;variable operator bytecodes
+count		bc_repeat_var_init_1
 count		bc_repeat_var_init
 count		bc_repeat_var_loop
 
@@ -2099,6 +2102,9 @@ error_ewaox:	call	set_error
 
 error_ewcwzwcz:	call	set_error
 		db	'Expected WC, WZ, or WCZ',0
+
+error_ewith:	call	set_error
+		db	'Expected WITH',0
 
 error_fpcmbp:	call	set_error
 		db	'Floating-point constant must be positive',0
@@ -5927,9 +5933,9 @@ insert_interpreter:
 @@var_longs	=	3Ch
 @@clkmode_hub	=	40h
 @@clkfreq_hub	=	44h
-@@_debugnop1_	=	0E4Ch
-@@_debugnop2_	=	0E50h
-@@_debugnop3_	=	0E54h
+@@_debugnop1_	=	0E54h
+@@_debugnop2_	=	0E58h
+@@_debugnop3_	=	0E5Ch
 
 interpreter:	include	"Spin2_interpreter.inc"
 interpreter_end:
@@ -9936,6 +9942,8 @@ cb_repeat:	mov	ebp,[column]		;set new column
 		pop	[source_ptr]
 		cmp	al,type_end		;count?
 		je	@@count
+		cmp	al,type_with		;count WITH var?
+		je	@@countvar
 
 
 		mov	al,type_repeat_var	;redo blocknext type to repeat-var
@@ -9965,7 +9973,31 @@ cb_repeat:	mov	ebp,[column]		;set new column
 		call	compile_block		;compile repeat block
 		mov	eax,0			;set 'next' address
 		call	write_bstack_ptr
-		mov	dh,bc_repeat_var_loop	;compile setup + repeat var loop
+		mov	dh,bc_repeat_var_loop	;compile setup + repeat_var_loop
+		call	compile_var_assign
+		mov	eax,1			;set 'quit' address
+		jmp	write_bstack_ptr
+
+
+@@countvar:	mov	al,type_repeat_count_var;redo blocknest type to repeat-count-var
+		call	redo_bnest
+		lea	eax,[@@countvarcomp]
+		jmp	@@optimize
+
+@@countvarcomp:	mov	eax,2			;compile loop address
+		call	compile_bstack_address
+		call	compile_exp		;compile count expression
+		call	get_with		;skip 'WITH'
+		call	get_variable		;get variable (ecx, esi, edi hold variable data)
+		call	get_end
+		mov	dh,bc_repeat_var_init_n	;compile setup + repeat_var_init_n
+		call	compile_var_assign
+		mov	eax,2			;set loop address
+		call	write_bstack_ptr
+		call	compile_block		;compile repeat block
+		mov	eax,0			;set 'next' address
+		call	write_bstack_ptr
+		mov	dh,bc_repeat_var_loop	;compile setup + repeat_var_loop
 		call	compile_var_assign
 		mov	eax,1			;set 'quit' address
 		jmp	write_bstack_ptr
@@ -10366,8 +10398,10 @@ ci_next_quit:	mov	ecx,[bnest_ptr]		;get blocknest ptr
 		je	@@got
 
 		cmp	al,type_repeat_var	;'repeat-var' blocknest?
+		je	@@repvar
+		cmp	al,type_repeat_count_var;'repeat-count-var' blocknest?
 		jne	@@notrepvar
-		cmp	bl,0			;'next' needs no pops
+@@repvar:	cmp	bl,0			;'next' needs no pops
 		je	@@got
 		add	edx,4*4			;'quit' needs 4 long pops
 		jmp	@@got
@@ -12413,6 +12447,15 @@ get_to:		push	eax			;'TO'
 		call	get_element
 		cmp	al,type_to
 		jne	error_eto
+		pop	ebx
+		pop	eax
+		ret
+
+get_with:	push	eax			;'WITH'
+		push	ebx
+		call	get_element
+		cmp	al,type_with
+		jne	error_ewith
 		pop	ebx
 		pop	eax
 		ret
@@ -16654,6 +16697,7 @@ automatic_symbols:
 	sym	type_from,		0,		'FROM'
 	sym	type_to,		0,		'TO'
 	sym	type_step,		0,		'STEP'
+	sym	type_with,		0,		'WITH'
 
 	sym	type_i_next_quit,	0,		'NEXT'		;high-level instructions
 	sym	type_i_next_quit,	1,		'QUIT'
