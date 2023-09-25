@@ -2378,13 +2378,13 @@ frel_		popa	w			'pop left-side float
 
 		bitl	w,#31		wcz	'make left-side comparable
 		cmp	w,##$7F800001	wc	'NaN?
+	if_nc	skip	#%1111			'if NaN, return false
 	if_z	neg	w			'+/- %0_xxxxxxxx_mmmmmmmmmmmmmmmmmmmmmmm
 
 		bitl	x,#31		wcz	'make right-side comparable
-	if_c	cmp	x,##$7F800001	wc	'NaN?
+		cmp	x,##$7F800001	wc	'NaN?
+	if_nc	skip	#%111111		'if NaN, return false
 	if_z	neg	x			'+/- %0_xxxxxxxx_mmmmmmmmmmmmmmmmmmmmmmm
-
-	if_nc	skip	#%11111			'if either NaN, return false
 
 		cmps	w,x		wcz	'do comparison
 	if_z	mov	y,#%1000		'equal?
