@@ -9,7 +9,7 @@
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2023 by Parallax, Inc.	*
-;*	    Last Updated: 2023/09/21		*
+;*	    Last Updated: 2023/11/11		*
 ;*						*
 ;************************************************
 ;
@@ -665,9 +665,11 @@ count		type_float		;	FLOAT
 count		type_round		;	ROUND
 count		type_trunc		;	TRUNC
 count		type_constr		;	STRING
+count		type_conlstr		;	LSTRING
 count		type_block		;	CON, VAR, DAT, OBJ, PUB, PRI
 count		type_field		;	FIELD
 count		type_size		;	BYTE, WORD, LONG
+count		type_sizes		;	BYTES, WORDS, LONGS
 count		type_size_fit		;	BYTEFIT, WORDFIT
 count		type_fvar		;	FVAR, FVARS
 count		type_file		;	FILE
@@ -1833,14 +1835,14 @@ error_bmbpbb:	call	set_error
 error_bdmbifc:	call	set_error
 		db	'Block designator must be in first column',0
 
-;error_bie:	call	set_error
-;TESTT		db	'Block is empty',0
-
 error_bmbft:	call	set_error
 		db	'BYTEFIT values must range from -$80 to $FF',0
 
 error_bnso:	call	set_error
 		db	'Blocknest stack overflow',0
+
+error_bwldcx:	call	set_error
+		db	'BYTE/WORD/LONG data cannot exceed 255 bytes',0
 
 error_caefl:	call	set_error
 		db	'Cog address exceeds FIT limit',0
@@ -2211,6 +2213,9 @@ error_loxupfe:	call	set_error
 error_loxuafe:	call	set_error
 		db	'Limit of 32 unique ARCHIVE files exceeded',0
 
+error_lscmrf:	call	set_error
+		db	'LSTRING characters must range from 0 to 255',0
+
 error_lvmb:	call	set_error
 		db	'Local variable must be within first 16 longs',0
 
@@ -2304,11 +2309,11 @@ error_rinaiom:	call	set_error
 error_rpcx:	call	set_error
 		db	'Register parameter cannot exceed $3FF',0
 
-error_scexc:	call	set_error
-		db	'String cannot exceed 253 characters',0
+error_sdcx:	call	set_error
+		db	'@"string"/STRING/LSTRING data cannot exceed 254 bytes',0
 
 error_scmrf:	call	set_error
-		db	'String characters must range from 1 to 255',0
+		db	'STRING characters must range from 1 to 255',0
 
 error_sdcobu:	call	set_error
 		db	'Symbol _DEBUG can only be used as an integer constant',0
@@ -11628,6 +11633,12 @@ compile_term:	cmp	al,type_con		;constant integer?
 		cmp	al,type_constr		;STRING?
 		je	ct_constr
 
+		cmp	al,type_conlstr		;LSTRING?
+		je	ct_conlstr
+
+		cmp	al,type_sizes		;BYTES/WORDS/LONGS?
+		je	ct_condata
+
 		cmp	al,type_float		;FLOAT?
 		jne	@@notfloat
 		mov	ebx,fc_float
@@ -11778,7 +11789,7 @@ ct_constr:	call	get_left		;get '('
 @@chrok:	mov	al,bl			;enter string chr
 		call	enter_obj
 		inc	cl			;check string length
-		jz	error_scexc
+		jz	error_sdcx
 		call	get_comma_or_right	;check for another character
 		je	@@chr
 
@@ -11790,12 +11801,79 @@ ct_constr:	call	get_left		;get '('
 		ret
 ;
 ;
-; Compile term - FLOAT(integer) / ROUND(float) / TRUNC(float)
+; Compile term - LSTRING("constantstring", zero_ok, zero_ok)
 ;
-;ct_frt:		call	back_element		;back up to FLOAT/ROUND/TRUNC
+ct_conlstr:	call	get_left		;get '('
+
+		mov	al,bc_string		;enter string bytecode
+		call	enter_obj
+
+		mov	edx,[obj_ptr]		;remember obj_ptr for patching length bytes
+
+		mov	al,0			;enter dummy length bytes, get patched later
+		call	enter_obj
+		call	enter_obj
+
+		mov	cl,1			;reset length, account for length byte
+@@chr:		call	get_value		;get string chr
+		jc	@@chrerror		;floating-point not allowed
+		cmp	ebx,0FFh		;above 0FFh not allowed
+		jbe	@@chrok
+@@chrerror:	ja	error_lscmrf
+@@chrok:	mov	al,bl			;enter string chr
+		call	enter_obj
+		inc	cl			;check string length
+		jz	error_sdcx
+		call	get_comma_or_right	;check for another character
+		je	@@chr
+
+		mov	[obj+edx],cl		;patch length bytes
+		dec	cl
+		mov	[obj+edx+1],cl
+
+		ret
 ;
-;		call	get_value		;get FLOAT/ROUND/TRUNC expression
-;TESTT		jmp	compile_constant	;compile constant
+;
+; Compile term - BYTES/WORDS/LONGS(value, value, BYTE/WORD/LONG value)
+;
+ct_condata:	mov	dl,bl			;save size
+
+		call	get_left		;get '('
+
+		mov	al,bc_string		;enter string bytecode
+		call	enter_obj
+
+		mov	esi,[obj_ptr]		;remember obj_ptr for patching length byte
+
+		mov	al,0			;enter dummy length byte, gets patched later
+		call	enter_obj
+
+		mov	ch,0			;reset length
+
+@@value:	call	get_element		;check for size override
+		cmp	al,type_size
+		mov	cl,bl
+		je	@@override
+		call	back_element
+		mov	cl,dl			;use default size
+@@override:	call	get_value
+
+@@enter:	mov	ah,1
+		shl	ah,cl
+
+@@byte:		mov	al,bl
+		call	enter_obj		;enter byte
+		inc	ch			;check data limit
+		jz	error_bwldcx
+		shr	ebx,8			;get next byte
+		dec	ah			;loop if another byte
+		jnz	@@byte
+		call	get_comma_or_right	;check for another value
+		je	@@value
+
+		mov	[obj+esi],ch		;patch length byte
+
+		ret
 ;
 ;
 ; Compile term - \obj{[]}.method({param,...}), \method({param,...}), \var({param,...}){:results}
@@ -12228,7 +12306,7 @@ ct_at:		call	get_element		;get string, object, method, or variable
 @@chrok:	mov	al,bl			;enter string chr
 		call	enter_obj
 		inc	cl			;check string length
-		jz	error_scexc
+		jz	error_sdcx
 		cmp	[source_flags],0	;check if string done
 		je	@@strdone
 		call	get_comma		;get comma and loop for next character
@@ -13578,9 +13656,10 @@ check_variable:	push	eax
 		je	@@checkindex
 
 		cmp	al,type_size		;BYTE/WORD/LONG?
-		jne	@@exit			;if not a variable, exit with z=0
-		mov	cl,bl
-		call	skip_index		;skip [base]
+		jne	@@exit			;if not, exit with z=0
+		call	check_index		;check for [base]
+		jne	@@exit			;if not, exit with z=0
+		mov	cl,bl			;remember size
 		jmp	@@checkindex
 
 @@lvdh:		call	check_dot		;local/var/dat/hub, check for .BYTE/WORD/LONG
@@ -16660,7 +16739,8 @@ automatic_symbols:
 	sym	type_round,		0,		'ROUND'
 	sym	type_trunc,		0,		'TRUNC'
 
-	sym	type_constr,		0,		'STRING'	;string expression
+	sym	type_constr,		0,		'STRING'	;string expressions
+	sym	type_conlstr,		0,		'LSTRING'
 
 	sym	type_block,		block_con,	'CON'		;block designators
 	sym	type_block,		block_obj,	'OBJ'
@@ -16671,7 +16751,11 @@ automatic_symbols:
 
 	sym	type_field,		0,		'FIELD'		;field
 
-	sym	type_size,		0,		'BYTE'		;sizes
+	sym	type_sizes,		0,		'BYTES'		;sizes
+	sym	type_sizes,		1,		'WORDS'
+	sym	type_sizes,		2,		'LONGS'
+
+	sym	type_size,		0,		'BYTE'		;size
 	sym	type_size,		1,		'WORD'
 	sym	type_size,		2,		'LONG'
 
