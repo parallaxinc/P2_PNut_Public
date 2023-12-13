@@ -66,67 +66,68 @@ const
   key_rgb24             = 28;
 
   key_longs_1bit        = 29;   // packed-data group
-  key_longs_2bit	= 30;
-  key_longs_4bit	= 31;
-  key_longs_8bit	= 32;
-  key_longs_16bit	= 33;
-  key_words_1bit	= 34;
-  key_words_2bit	= 35;
-  key_words_4bit	= 36;
-  key_words_8bit	= 37;
-  key_bytes_1bit	= 38;
+  key_longs_2bit        = 30;
+  key_longs_4bit        = 31;
+  key_longs_8bit        = 32;
+  key_longs_16bit       = 33;
+  key_words_1bit        = 34;
+  key_words_2bit        = 35;
+  key_words_4bit        = 36;
+  key_words_8bit        = 37;
+  key_bytes_1bit        = 38;
   key_bytes_2bit        = 39;
-  key_bytes_4bit	= 40;
+  key_bytes_4bit        = 40;
 
   key_alt               = 41;   // keywords
-  key_backcolor         = 42;
-  key_box               = 43;
-  key_cartesian         = 44;
-  key_channel           = 45;
-  key_circle            = 46;
-  key_clear             = 47;
-  key_close             = 48;
-  key_color             = 49;
-  key_depth             = 50;
-  key_dot               = 51;
-  key_dotsize           = 52;
-  key_hidexy            = 53;
-  key_holdoff           = 54;
-  key_line              = 55;
-  key_linesize          = 56;
-  key_logscale          = 57;
-  key_lutcolors         = 58;
-  key_mag               = 59;
-  key_obox              = 60;
-  key_opacity           = 61;
-  key_origin            = 62;
-  key_oval              = 63;
-  key_pc_key            = 64;
-  key_pc_mouse          = 65;
-  key_polar             = 66;
-  key_pos               = 67;
-  key_precise           = 68;
-  key_range             = 69;
-  key_rate              = 70;
-  key_samples           = 71;
-  key_save              = 72;
-  key_scroll            = 73;
-  key_set               = 74;
-  key_signed            = 75;
-  key_size              = 76;
-  key_spacing           = 77;
-  key_sparse            = 78;
-  key_sprite            = 79;
-  key_spritedef         = 80;
-  key_text              = 81;
-  key_textangle         = 82;
-  key_textsize          = 83;
-  key_textstyle         = 84;
-  key_title             = 85;
-  key_trace             = 86;
-  key_trigger           = 87;
-  key_update            = 88;
-  key_window            = 89;
+  key_auto              = 42;
+  key_backcolor         = 43;
+  key_box               = 44;
+  key_cartesian         = 45;
+  key_channel           = 46;
+  key_circle            = 47;
+  key_clear             = 48;
+  key_close             = 49;
+  key_color             = 50;
+  key_depth             = 51;
+  key_dot               = 52;
+  key_dotsize           = 53;
+  key_hidexy            = 54;
+  key_holdoff           = 55;
+  key_line              = 56;
+  key_linesize          = 57;
+  key_logscale          = 58;
+  key_lutcolors         = 59;
+  key_mag               = 60;
+  key_obox              = 61;
+  key_opacity           = 62;
+  key_origin            = 63;
+  key_oval              = 64;
+  key_pc_key            = 65;
+  key_pc_mouse          = 66;
+  key_polar             = 67;
+  key_pos               = 68;
+  key_precise           = 69;
+  key_range             = 70;
+  key_rate              = 71;
+  key_samples           = 72;
+  key_save              = 73;
+  key_scroll            = 74;
+  key_set               = 75;
+  key_signed            = 76;
+  key_size              = 77;
+  key_spacing           = 78;
+  key_sparse            = 79;
+  key_sprite            = 80;
+  key_spritedef         = 81;
+  key_text              = 82;
+  key_textangle         = 83;
+  key_textsize          = 84;
+  key_textstyle         = 85;
+  key_title             = 86;
+  key_trace             = 87;
+  key_trigger           = 88;
+  key_update            = 89;
+  key_window            = 90;
 
   TypeName              : array [dis_logic..dis_midi] of string = (
                           'LOGIC',
@@ -302,6 +303,7 @@ private
   vLogicLabel           : array [0..TopLogicChannel] of string;
   vLogicColor           : array [0..TopLogicChannel] of integer;
   vLabel                : array [0..TopChannel] of string;
+  vAuto                 : array [0..TopChannel] of boolean;
   vHigh                 : array [0..TopChannel] of integer;
   vLow                  : array [0..TopChannel] of integer;
   vMag                  : array [0..TopChannel] of integer;
@@ -379,18 +381,18 @@ private
   MidiNumX              : array [0..127] of integer;
   MidiVelocity          : array [0..127] of integer;
 
-  FFTexp		: integer;
+  FFTexp                : integer;
   FFTmag                : integer;
   FFTfirst              : integer;
   FFTlast               : integer;
-  FFTsin		: array [0..FFTmax - 1] of int64;
-  FFTcos		: array [0..FFTmax - 1] of int64;
-  FFTwin		: array [0..FFTmax - 1] of int64;
-  FFTreal	        : array [0..FFTmax - 1] of int64;
-  FFTimag	        : array [0..FFTmax - 1] of int64;
-  FFTsamp	        : array [0..FFTmax - 1] of integer;
-  FFTpower	        : array [0..FFTmax div 2 - 1] of integer;
-  FFTangle	        : array [0..FFTmax div 2 - 1] of integer;
+  FFTsin                : array [0..FFTmax - 1] of int64;
+  FFTcos                : array [0..FFTmax - 1] of int64;
+  FFTwin                : array [0..FFTmax - 1] of int64;
+  FFTreal               : array [0..FFTmax - 1] of int64;
+  FFTimag               : array [0..FFTmax - 1] of int64;
+  FFTsamp               : array [0..FFTmax - 1] of integer;
+  FFTpower              : array [0..FFTmax div 2 - 1] of integer;
+  FFTangle              : array [0..FFTmax div 2 - 1] of integer;
 
   SpritePixels          : array [0..SpriteMax * SpriteMaxX * SpriteMaxY - 1] of byte;
   SpriteColors          : array [0..SpriteMax * 256 - 1] of integer;
@@ -1127,6 +1129,7 @@ begin
   if (vDotSize = 0) and (vLineSize = 0) then vDotSize := 1;
   for i := 0 to TopChannel do
   begin
+    vAuto[i] := False;
     vLow[i]  := -$80000000;
     vHigh[i] := $7FFFFFFF;
     vTall[i] := vHeight;
@@ -1155,8 +1158,16 @@ begin
     begin
       if vIndex <> Channels then Inc(vIndex);
       vLabel[vIndex - 1] := PChar(val);
-      if not KeyVal( vLow[vIndex - 1]) then Continue;
-      if not KeyVal(vHigh[vIndex - 1]) then Continue;
+      if NextKey then
+      begin
+        if val <> key_auto then Continue;
+        vAuto[vIndex - 1] := True;
+      end
+      else
+      begin
+        if not KeyVal( vLow[vIndex - 1]) then Continue;
+        if not KeyVal(vHigh[vIndex - 1]) then Continue;
+      end;
       if not KeyVal(vTall[vIndex - 1]) then Continue;
       if not KeyVal(vBase[vIndex - 1]) then Continue;
       if not KeyVal(vGrid[vIndex - 1]) then Continue;
@@ -1262,6 +1273,17 @@ var
   v: int64;
   fScale: Extended;
 begin
+  for j := vIndex - 1 downto 0 do if vAuto[j] then       // preview any channels for autoscaling
+  begin
+    vLow[j] := $7FFFFFFF;
+    vHigh[j] := -$80000000;
+    for k := SamplePop - 1 downto 0 do
+    begin
+      v := Y_SampleBuff[((SamplePtr - k - 1) and Y_PtrMask) * Y_SetSize + j];
+      if v < vLow[j] then vLow[j] := v;
+      if v > vHigh[j] then vHigh[j] := v;
+    end;
+  end;
   ClearBitmap;
   for j := vIndex - 1 downto 0 do
   begin
@@ -4162,4 +4184,3 @@ begin
 end;
 
 end.
-

@@ -9,7 +9,7 @@
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2023 by Parallax, Inc.	*
-;*	    Last Updated: 2023/11/11		*
+;*	    Last Updated: 2023/12/12		*
 ;*						*
 ;************************************************
 ;
@@ -49,8 +49,9 @@ debug_display_limit	=	1100		;must be same in delphi
 ddsymbols_limit_auto	=	1000h
 ddsymbols_limit_name	=	1000h
 
-symbols_limit_param	=	400h
 symbols_limit_auto	=	10000h		;adjust as needed to accommodate auto symbols
+symbols_limit_level	=	100h
+symbols_limit_param	=	400h
 symbols_limit_main	=	40000h
 symbols_limit_local	=	8000h
 symbols_limit_inline	=	8000h
@@ -669,7 +670,6 @@ count		type_conlstr		;	LSTRING
 count		type_block		;	CON, VAR, DAT, OBJ, PUB, PRI
 count		type_field		;	FIELD
 count		type_size		;	BYTE, WORD, LONG
-count		type_sizes		;	BYTES, WORDS, LONGS
 count		type_size_fit		;	BYTEFIT, WORDFIT
 count		type_fvar		;	FVAR, FVARS
 count		type_file		;	FILE
@@ -2258,6 +2258,9 @@ error_os:	call	set_error
 error_nchcor:	call	set_error
 		db	'NOP cannot have a condition or _RET_',0
 
+error_nmt4c:	call	set_error
+		db	'No more than 4 characters can be packed into a long',0
+
 error_onawiac:	call	set_error
 		db	'ORG not allowed within inline assembly code',0
 
@@ -2436,6 +2439,7 @@ ddx		esp_save			;stack pointer for abort
 _compile1:	mov	[error],1		;init error to true
 		mov	[esp_save],esp		;save esp in case of error
 
+		call	enter_symbols_level	;enter level symbols after determining spin2 level
 		call	enter_symbols_param	;enter parameter symbols
 		call	reset_symbols_main	;reset main symbols
 		call	reset_symbols_local	;reset local symbols
@@ -2606,8 +2610,20 @@ dbx		doc_mode
 ;
 ; Print obj data
 ;
-print_obj:	call	print_string		;print clk settings
-		db	13,13,'CLKMODE:   $',0
+print_obj:	call	print_string		;print spin2 level
+		db	13,'Spin2_v',0
+		movzx	eax,[spin2_level]
+		mov	dl,10
+		div	dl
+		add	al,'0'
+		call	print_chr
+		mov	al,ah
+		add	al,'0'
+		call	print_chr
+		call	print_cr
+
+		call	print_string		;print clk settings
+		db	13,'CLKMODE:   $',0
 		mov	eax,[clkmode]
 		call	print_long
 		call	print_string
@@ -2621,11 +2637,10 @@ print_obj:	call	print_string		;print clk settings
 		call	print_cr
 		call	print_cr
 
-
 		cmp	[pasm_mode],1		;spin or pasm?
 		je	@@pasm
 
-		mov	eax,[distilled_bytes]
+		mov	eax,[distilled_bytes]	;print distilled bytes
 		or	eax,eax
 		jz	@@nodistill
 		call	print_string
@@ -3029,7 +3044,113 @@ determine_mode:	call	reset_element
 @@done:		mov	[pasm_mode],cl		;Spin or PASM mode (DAT and no OBJ/VAR/PUB/PRI)
 
 		ret
+;
+;
+; Determine Spin2 level
+;
+determine_level:
 
+		call	reset_element
+
+@@scan:		call	get_element		;skip past comment lines
+		mov	ecx,[source_finish]	;end of file?
+		jc	@@end
+		cmp	al,type_end		;end of initial comments?
+		mov	ecx,[source_start]
+		je	@@scan
+@@end:
+		jecxz	@@none			;if position 0, done
+
+		mov	esi,[source]		;point to start of file, ecx holds length
+@@check:	mov	ebx,0			;reset offset
+
+		call	@@chr			;check for '{spin2_v##}' at each offset
+		cmp	al,'{'
+		jne	@@not
+
+		call	@@chr
+		cmp	al,'S'
+		jne	@@not
+
+		call	@@chr
+		cmp	al,'P'
+		jne	@@not
+
+		call	@@chr
+		cmp	al,'I'
+		jne	@@not
+
+		call	@@chr
+		cmp	al,'N'
+		jne	@@not
+
+		call	@@chr
+		jnc	@@not
+		cmp	al,2
+		jne	@@not
+
+		call	@@chr
+		cmp	al,'_'
+		jne	@@not
+
+		call	@@chr
+		cmp	al,'V'
+		jne	@@not
+
+		call	@@chr
+		jnc	@@not
+		mov	dl,10
+		mul	dl
+		mov	dl,al
+
+		call	@@chr
+		jnc	@@not
+		add	dl,al
+
+		call	@@chr
+		cmp	al,'}'
+		je	@@got
+
+@@not:		inc	esi			;not '{spin2_v##}'
+		loop	@@check			;check from next chr until out of chrs
+
+@@none:		mov	dl,0			;default to earliest level
+
+@@got:		lea	esi,[@@levels]		;validate level
+@@pick:		lodsb
+		cmp	dl,al
+		jae	@@valid
+		cmp	[byte esi],0
+		jne	@@pick
+
+@@valid:	mov	[spin2_level],al	;save level
+		ret
+
+
+@@chr:		mov	al,[byte esi+ebx]	;get next chr
+		inc	ebx
+
+		cmp	al,'a'			;make uppercase
+		jb	@@case
+		cmp	al,'z'
+		ja	@@case
+		sub	al,'a'-'A'
+@@case:
+		cmp	al,'0'			;check digit
+		jb	@@ndig
+		cmp	al,'9'
+		ja	@@ndig
+		sub	al,'0'
+		stc				;digit in al, c=1
+		ret
+
+@@ndig:		clc				;chr in al, c=0
+		ret
+
+
+@@levels:	db	43,41,0			;valid spin2 levels, latest to earliest
+
+dbx		spin2_level
 ;
 ;
 ; Compile con blocks
@@ -3457,8 +3578,7 @@ compile_sub_blocks_id:
 
 		call	check_leftb		;check for '[' to signify array
 		jne	@@noarray
-		call	get_value_int		;array, skip size
-		call	get_rightb		;get ']'
+		call	scan_to_rightb		;array, scan to ']'
 @@noarray:
 		call	get_comma_or_end	;get comma or end
 		je	@@local			;if comma, get next local
@@ -7070,7 +7190,7 @@ get_element:	push	ecx
 		cmp	al,"}"			;unmatched brace comment end?
 		je	@@error_bcom
 
-		cmp	al,'%'			;binary?
+		cmp	al,'%'			;binary or packed characters?
 		je	@@bin
 
 		cmp	al,'$'			;hex?
@@ -7201,8 +7321,10 @@ get_element:	push	ecx
 @@eol:		mov	al,type_end		;end of line
 		jmp	@@got
 
-@@bin:		lodsb				;% or %%?
-		cmp	al,'%'
+@@bin:		lodsb				;%"?
+		cmp	al,'"'
+		je	@@packed
+		cmp	al,'%'			;% or %%?
 		je	@@double
 
 		mov	cl,2			;% binary or $
@@ -7270,8 +7392,40 @@ get_element:	push	ecx
 @@con7:		dec	esi			;integer done, back up to last chr
 		cmp	ch,0			;trap overflow
 		jne	@@error_con
-		mov	eax,type_con		;return constant
+@@con8:		mov	eax,type_con		;return constant
 		jmp	@@got
+
+@@packed:	call	@@packedchr		;packed chrs
+		cmp	al,'"'
+		je	@@error_str
+		mov	bl,al
+		call	@@packedchr
+		cmp	al,'"'
+		je	@@con8
+		mov	bh,al
+		call	@@packedchr
+		cmp	al,'"'
+		je	@@con8
+		ror	ebx,16
+		mov	bl,al
+		rol	ebx,16
+		call	@@packedchr
+		cmp	al,'"'
+		je	@@con8
+		ror	ebx,24
+		mov	bl,al
+		rol	ebx,24
+		call	@@packedchr
+		cmp	al,'"'
+		je	@@con8
+		jmp	@@error_nmt4c
+
+@@packedchr:	lodsb				;get packed chr
+		cmp	al,0			;if eof, error
+		je	@@error_str2
+		cmp	al,13			;if eol, error
+		je	@@error_str3
+		ret
 
 @@sym:		lodsb				;symbol, gather chrs
 		call	check_word_chr
@@ -7332,6 +7486,11 @@ get_element:	push	ecx
 
 @@error_str3:	call	@@setptrs		;error, unterminated string
 		jmp	error_eatq
+
+@@error_nmt4c:	inc	edx			;error, too many packed chrs
+		inc	edx
+		call	@@setptrs
+		jmp	error_nmt4c
 
 @@error_flt:	call	@@setptrs		;error, floating-point constant invalid
 		jmp	error_fpcmbw
@@ -11465,7 +11624,7 @@ dbx		debug_record,100h
 ;*  Expression Compiler							*
 ;************************************************************************
 ;
-; Basic expression syntax rules:		i.e.  4000 / (ABS x * 5) // 127) + 1
+; Basic expression syntax rules:     i.e.  4000 / (ABS x * 5) // 127) + 1
 ;
 ;	Any one of these...	Must be followed by any one of these...
 ;	------------------------------------------------------------------
@@ -11636,9 +11795,12 @@ compile_term:	cmp	al,type_con		;constant integer?
 		cmp	al,type_conlstr		;LSTRING?
 		je	ct_conlstr
 
-		cmp	al,type_sizes		;BYTES/WORDS/LONGS?
-		je	ct_condata
-
+		cmp	al,type_size		;BYTE/WORD/LONG?
+		jne	@@notsize
+		call	check_left
+		jne	@@notsize
+		jmp	ct_condata
+@@notsize:
 		cmp	al,type_float		;FLOAT?
 		jne	@@notfloat
 		mov	ebx,fc_float
@@ -11834,11 +11996,9 @@ ct_conlstr:	call	get_left		;get '('
 		ret
 ;
 ;
-; Compile term - BYTES/WORDS/LONGS(value, value, BYTE/WORD/LONG value)
+; Compile term - BYTE/WORD/LONG(value, value, BYTE/WORD/LONG value)
 ;
 ct_condata:	mov	dl,bl			;save size
-
-		call	get_left		;get '('
 
 		mov	al,bc_string		;enter string bytecode
 		call	enter_obj
@@ -12651,6 +12811,35 @@ get_pipe_or_end:
 		inc	eax			;end, z=0
 
 @@exit:		pop	ebx
+		pop	eax
+		ret
+;
+;
+; Scan to ']'
+;
+scan_to_rightb:	push	eax
+		push	ebx
+		push	ecx
+
+		xor	ecx,ecx			;reset nested '[]' counter
+@@nest:		inc	ecx			;inc nest level
+
+@@next:		call	get_element		;get next element
+
+		cmp	al,type_end		;if end of line, error
+		je	error_erightb
+
+		cmp	al,type_leftb		;if '[', inc nest level, get next
+		je	@@nest
+
+		cmp	al,type_rightb		;if not ']', get next
+		jne	@@next
+
+		dec	ecx			;']', dec nest level, get next if nested
+		jnz	@@next
+
+@@done:		pop	ecx			;got it
+		pop	ebx
 		pop	eax
 		ret
 ;
@@ -15613,6 +15802,7 @@ count	dd_key_bytes_2bit		;BYTES_2BIT
 count	dd_key_bytes_4bit		;BYTES_4BIT
 
 count	dd_key_alt			;ALT		keywords
+count	dd_key_auto			;AUTO
 count	dd_key_backcolor		;BACKCOLOR
 count	dd_key_box			;BOX
 count	dd_key_cartesian		;CARTESIAN
@@ -15721,6 +15911,7 @@ debug_symbols:
 	sym	dd_key,	dd_key_bytes_4bit,		'BYTES_4BIT'
 
 	sym	dd_key,	dd_key_alt,			'ALT'		;keywords
+	sym	dd_key,	dd_key_auto,			'AUTO'
 	sym	dd_key,	dd_key_backcolor,		'BACKCOLOR'
 	sym	dd_key,	dd_key_box,			'BOX'
 	sym	dd_key,	dd_key_cartesian,		'CARTESIAN'
@@ -16221,13 +16412,17 @@ ddx		symbol_ptr			;these three must be set to the current symbol set
 ddx		symbol_ptr_limit
 ddx		symbol_hash_ptr
 
-ddx		symbols_hash_param,1000h	;parameter symbols
-dbx		symbols_param,symbols_limit_param
-ddx		symbols_ptr_param
-
 ddx		symbols_hash_auto,1000h		;auto symbols
 dbx		symbols_auto,symbols_limit_auto
 ddx		symbols_ptr_auto
+
+ddx		symbols_hash_level,1000h	;spin2 level symbols
+dbx		symbols_level,symbols_limit_level
+ddx		symbols_ptr_level
+
+ddx		symbols_hash_param,1000h	;parameter symbols
+dbx		symbols_param,symbols_limit_param
+ddx		symbols_ptr_param
 
 ddx		symbols_hash_main,1000h		;main symbols
 dbx		symbols_main,symbols_limit_main
@@ -16246,6 +16441,46 @@ ddx		symbol_exists_ptr
 
 dbx		symbol,symbol_limit+2		;+2 for obj.method extra byte and 0
 dbx		symbol2,symbol_limit+2
+;
+;
+; Enter auto symbols into hashed symbol table
+;
+enter_symbols_auto:
+
+		call	reset_symbols_auto
+		call	write_symbols_auto
+		lea	esi,[automatic_symbols]
+
+enter_symbols:	call	hash_symbol		;hash symbol name to get length
+
+		lea	edi,[symbol2]		;copy symbol name to symbol2
+	rep	movsb
+		lodsd				;get value
+		mov	ebx,eax
+		lodsb				;get type
+		call	enter_symbol2		;enter symbol
+
+		cmp	[byte esi],0		;end of automatic symbols?
+		jne	enter_symbols
+
+		ret
+;
+;
+; Discover Spin2 level and enter associated symbols
+;
+enter_symbols_level:
+
+		call	reset_symbols_level
+		call	write_symbols_level
+
+		call	determine_level
+
+		cmp	[spin2_level],43
+		jb	@@not
+		lea	esi,[level43_symbols]
+		call	enter_symbols
+@@not:
+		ret
 ;
 ;
 ; Enter param symbols into hashed symbol table
@@ -16276,39 +16511,21 @@ enter_symbols_param:
 @@done:		ret
 ;
 ;
-; Enter auto symbols into hashed symbol table
-;
-enter_symbols_auto:
-
-		call	reset_symbols_auto
-		call	write_symbols_auto
-		lea	esi,[automatic_symbols]	;reset pointers
-
-enter_symbols:	call	hash_symbol		;hash symbol name to get length
-
-		lea	edi,[symbol2]		;copy symbol name to symbol2
-	rep	movsb
-		lodsd				;get value
-		mov	ebx,eax
-		lodsb				;get type
-		call	enter_symbol2		;enter symbol
-
-		cmp	[byte esi],0		;end of automatic symbols?
-		jne	enter_symbols
-
-		ret
-;
-;
 ; Reset auto/main/local/inline symbols
 ;
-reset_symbols_param:
-
-		mov	edi,offset symbols_hash_param
-		jmp	reset_hash_table
-
 reset_symbols_auto:
 
 		mov	edi,offset symbols_hash_auto
+		jmp	reset_hash_table
+
+reset_symbols_level:
+
+		mov	edi,offset symbols_hash_level
+		jmp	reset_hash_table
+
+reset_symbols_param:
+
+		mov	edi,offset symbols_hash_param
 		jmp	reset_hash_table
 
 reset_symbols_main:
@@ -16336,18 +16553,25 @@ reset_hash_table:
 ;
 ; Write auto/main/local/inline symbols
 ;
-write_symbols_param:
-
-		mov	[symbol_ptr],		offset symbols_param
-		mov	[symbol_ptr_limit],	offset symbols_param + symbols_limit_param - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_param
-		ret
-
 write_symbols_auto:
 
 		mov	[symbol_ptr],		offset symbols_auto
 		mov	[symbol_ptr_limit],	offset symbols_auto + symbols_limit_auto - (1+32+1+4+1+4)
 		mov	[symbol_hash_ptr],	offset symbols_hash_auto
+		ret
+
+write_symbols_level:
+
+		mov	[symbol_ptr],		offset symbols_level
+		mov	[symbol_ptr_limit],	offset symbols_level + symbols_limit_level - (1+32+1+4+1+4)
+		mov	[symbol_hash_ptr],	offset symbols_hash_level
+		ret
+
+write_symbols_param:
+
+		mov	[symbol_ptr],		offset symbols_param
+		mov	[symbol_ptr_limit],	offset symbols_param + symbols_limit_param - (1+32+1+4+1+4)
+		mov	[symbol_hash_ptr],	offset symbols_hash_param
 		ret
 
 write_symbols_main:
@@ -16450,7 +16674,7 @@ find_param:	push	ecx
 		ret
 ;
 ;
-; Find symbol in auto/main/local/inline symbol table
+; Find symbol in auto/level/main/local/inline symbol table
 ; symbol must hold name, terminated with 0
 ; if found, eax=type and ebx=value
 ; if not found, eax=0 (type_undefined) and ebx=0
@@ -16464,6 +16688,10 @@ find_symbol:	push	ecx
 		call	hash_symbol
 
 		mov	ebx,offset symbols_hash_auto		;search auto symbols
+		call	check_symbol
+		jnc	@@found
+
+		mov	ebx,offset symbols_hash_level		;search spin2 level symbols
 		call	check_symbol
 		jnc	@@found
 
@@ -16740,7 +16968,6 @@ automatic_symbols:
 	sym	type_trunc,		0,		'TRUNC'
 
 	sym	type_constr,		0,		'STRING'	;string expressions
-	sym	type_conlstr,		0,		'LSTRING'
 
 	sym	type_block,		block_con,	'CON'		;block designators
 	sym	type_block,		block_obj,	'OBJ'
@@ -16750,10 +16977,6 @@ automatic_symbols:
 	sym	type_block,		block_dat,	'DAT'
 
 	sym	type_field,		0,		'FIELD'		;field
-
-	sym	type_sizes,		0,		'BYTES'		;sizes
-	sym	type_sizes,		1,		'WORDS'
-	sym	type_sizes,		2,		'LONGS'
 
 	sym	type_size,		0,		'BYTE'		;size
 	sym	type_size,		1,		'WORD'
@@ -17850,6 +18073,12 @@ automatic_symbols:
 	sym	type_con,		14,		'EVENT_ATN'
 	sym	type_con,		15,		'EVENT_QMT'
 
+	db	0
+
+
+level43_symbols:
+
+	sym	type_conlstr,		0,		'LSTRING'
 	db	0
 ;
 ;
