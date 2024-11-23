@@ -290,7 +290,7 @@ app_longs2	long	0			'number of longs in application		(set by programmer)
 zeroc						'(used by programmer as long 0)
 app_sum		long	0			'-sum of application longs		(set by programmer)
 x						'(used by loader as variable)
-loader_sum	byte	-"P",!"r",!"o",!"p"	'"Prop" - sum of $100 loader longs	(set by programmer)
+loader_sum	long	-%"Prop"		'"Prop" - sum of $100 loader longs	(set by programmer)
 '
 '
 ' Application start

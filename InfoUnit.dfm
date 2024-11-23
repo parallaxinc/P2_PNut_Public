@@ -1,5 +1,5 @@
 object InfoForm: TInfoForm
-  Left = 5
+  Left = 2
   Top = 2084
   BorderStyle = bsSingle
   Caption = 'Object Info'

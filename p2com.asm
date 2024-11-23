@@ -1,15 +1,14 @@
 ; ADDPINS/ADDBITS only allowed in PASM under #immediate expression
 ; Allow INA/INB/etc to be used in CON expressions as register values
 
+
 ;************************************************
 ;*						*
-;*		Spin2 Compiler			*
-;*						*
-;*		  Version 0.1			*
+;*	       Spin2 Compiler v46		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2023 by Parallax, Inc.	*
-;*	    Last Updated: 2023/12/12		*
+;*	    Last Updated: 2024/11/20		*
 ;*						*
 ;************************************************
 ;
@@ -38,6 +37,8 @@
 ;
 ; Equates
 ;
+spin2_version		=	46
+
 obj_limit		=	100000h		;must be same in delphi
 file_limit		=	32		;must be same in delphi
 param_limit		=	16		;must be same in delphi
@@ -50,25 +51,30 @@ ddsymbols_limit_auto	=	1000h
 ddsymbols_limit_name	=	1000h
 
 symbols_limit_auto	=	10000h		;adjust as needed to accommodate auto symbols
-symbols_limit_level	=	100h
+symbols_limit_level	=	400h		;adjust as needed to accommodate level symbols
 symbols_limit_param	=	400h
 symbols_limit_main	=	40000h
 symbols_limit_local	=	8000h
 symbols_limit_inline	=	8000h
 
+struct_id_limit		=	1000h		;cannot exceed $1000
+struct_def_limit	=	8000h
+
 symbol_limit		=	30
 pubcon_list_limit	=	10000h
+
 block_nest_limit	=	16
 block_stack_limit	=	1000h
 if_limit		=	256
 case_limit		=	256
 case_fast_limit		=	256		;cannot exceed 256
+
 params_limit		=	127
 results_limit		=	15
 locals_limit		=	10000h + params_limit*4 + results_limit*4
 subs_limit		=	1024
 objs_limit		=	1024
-distiller_limit		=	4000h
+distiller_limit		=	10000h
 
 inline_limit		=	120h
 mrecv_reg		=	1D2h
@@ -649,7 +655,7 @@ count		type_back		;	\
 count		type_under		;	_
 count		type_tick		;	`
 count		type_dollar		;	$ (without a hex digit following)
-count		type_percent		;	% (without a bin digit following)
+count		type_percent		;	% (without a bin digit or quote following)
 count		type_dot		;	.
 count		type_dotdot		;	..
 count		type_at			;	@
@@ -661,6 +667,7 @@ count		type_inc		;	++
 count		type_dec		;	--
 count		type_rnd		;	??
 count		type_assign		;	:=
+count		type_swap		;	:=:
 count		type_op			;	!, -, ABS, ENC, etc.
 count		type_float		;	FLOAT
 count		type_round		;	ROUND
@@ -669,6 +676,8 @@ count		type_constr		;	STRING
 count		type_conlstr		;	LSTRING
 count		type_block		;	CON, VAR, DAT, OBJ, PUB, PRI
 count		type_field		;	FIELD
+count		type_struct		;	STRUCT
+count		type_sizeof		;	SIZEOF
 count		type_size		;	BYTE, WORD, LONG
 count		type_size_fit		;	BYTEFIT, WORDFIT
 count		type_fvar		;	FVAR, FVARS
@@ -694,7 +703,7 @@ count		type_with		;	WITH
 count		type_i_next_quit	;	NEXT/QUIT
 count		type_i_return		;	RETURN
 count		type_i_abort		;	ABORT
-count		type_i_look		;	LOOKUPZ/LOOKUP/LOOKDOWNZ/LOOKDOWN
+count		type_i_look		;	LOOKUPZ, LOOKUP, LOOKDOWNZ, LOOKDOWN
 count		type_i_cogspin		;	COGSPIN
 count		type_i_flex		;	HUBSET, COGINIT, COGSTOP...
 count		type_recv		;	RECV
@@ -708,26 +717,47 @@ count		type_asm_inst		;	RDBYTE, RDWORD, RDLONG, etc.
 count		type_asm_effect		;	WC, WZ, WCZ
 count		type_asm_effect2	;	ANDC, ANDZ, ORC, ORZ, XORC, XORZ
 count		type_reg		;	REG
-count		type_con		;	user constant integer (must be followed by type_con_float)
+count		type_con_int		;	user constant integer		(must be followed by type_con_float)
 count		type_con_float		;	user constant float
-count		type_register		;	user long register
-count		type_loc_byte		;	user byte local
-count		type_loc_word		;	user word local
-count		type_loc_long		;	user long local
-count		type_var_byte		;V0	user byte var
-count		type_var_word		;V1	user word var
-count		type_var_long		;V2	user long var
-count		type_dat_byte		;D0	user byte dat
-count		type_dat_word		;D1	user word dat (must follow type_dat_byte)
-count		type_dat_long		;D2	user long dat (must follow type_dat_word)
-count		type_dat_long_res	;(D2)	user res dat (must follow type_dat_long)
-count		type_hub_byte		;H0	user byte hub
-count		type_hub_word		;H1	user word hub
-count		type_hub_long		;H2	user long hub
+count		type_con_struct		;	user data structure
+count		type_register		;	user register long
+count		type_loc_byte		;L0	user loc byte			(L0..L11 must be contiguous)
+count		type_loc_word		;L1	user loc word
+count		type_loc_long		;L2	user loc long
+count		type_loc_struct		;L3	user loc struct
+count		type_loc_byte_ptr	;L4	user loc byte ptr
+count		type_loc_word_ptr	;L5	user loc word ptr
+count		type_loc_long_ptr	;L6	user loc long ptr
+count		type_loc_struct_ptr	;L7	user loc struct ptr
+count		type_loc_byte_ptr_val	;L8	internal loc byte ptr val
+count		type_loc_word_ptr_val	;L9	internal loc word ptr val
+count		type_loc_long_ptr_val	;L10	internal loc long ptr val
+count		type_loc_struct_ptr_val	;L11	internal loc struct ptr val
+count		type_var_byte		;V0	user var byte			(V0..V11 must be contiguous)
+count		type_var_word		;V1	user var word
+count		type_var_long		;V2	user var long
+count		type_var_struct		;V3	user var struct
+count		type_var_byte_ptr	;V4	user var byte ptr
+count		type_var_word_ptr	;V5	user var word ptr
+count		type_var_long_ptr	;V6	user var long ptr
+count		type_var_struct_ptr	;V7	user var struct ptr
+count		type_var_byte_ptr_val	;V8	internal var byte ptr val
+count		type_var_word_ptr_val	;V9	internal var word ptr val
+count		type_var_long_ptr_val	;V10	internal var long ptr val
+count		type_var_struct_ptr_val	;V11	internal var struct ptr val
+count		type_dat_byte		;D0	user dat byte			(D0..D3 must be contiguous)
+count		type_dat_word		;D1	user dat word
+count		type_dat_long		;D2	user dat long
+count		type_dat_struct		;D3	user dat struct
+count		type_dat_long_res	;(D2)	user dat long reserve
+count		type_hub_byte		;H0	user hub byte (unused)		(H0..H2 must be contiguous)
+count		type_hub_word		;H1	user hub word (unused)
+count		type_hub_long		;H2	user hub long (CLKMODE, CLKFREQ)
 count		type_obj		;	user object
-count		type_objpub		;	user object.subroutine
-count		type_objcon		;	user object.constant (must be followed by type_objcon_float)
+count		type_objpub		;	user object.method()
+count		type_objcon_int		;	user object.constant integer	(must be followed by type_objcon_float)
 count		type_objcon_float	;	user object.constant float
+count		type_objcon_struct	;	user object.constant structure TESTT future work
 count		type_method		;	user method
 count		type_end		;	end-of-line c=0, end-of-file c=1
 ;
@@ -803,15 +833,10 @@ count		bc_getct
 count		bc_pollct
 count		bc_waitct
 
-count		bc_pinwrite
 count		bc_pinlow
 count		bc_pinhigh
 count		bc_pintoggle
 count		bc_pinfloat
-count		bc_pinread
-
-count		bc_pinstart
-count		bc_pinclear
 
 count		bc_wrpin
 count		bc_wxpin
@@ -819,6 +844,9 @@ count		bc_wypin
 count		bc_akpin
 count		bc_rdpin
 count		bc_rqpin
+
+count		bc_unused_3F
+count		bc_unused_40
 
 count		bc_debug
 
@@ -862,16 +890,18 @@ count		bc_setup_long_pbase_pi
 count		bc_setup_long_vbase_pi
 count		bc_setup_long_dbase_pi
 
-count		bc_setup_byte_pb_pi
-count		bc_setup_word_pb_pi
-count		bc_setup_long_pb_pi
-
 count		bc_setup_byte_pa
 count		bc_setup_word_pa
 count		bc_setup_long_pa
 
-count		unused1
-count		unused2
+count		bc_setup_byte_pb_pi
+count		bc_setup_word_pb_pi
+count		bc_setup_long_pb_pi
+
+count		bc_setup_struct_pbase
+count		bc_setup_struct_vbase
+count		bc_setup_struct_dbase
+count		bc_setup_struct_pop
 
 count		bc_ternary
 
@@ -941,7 +971,9 @@ counti		bc_read_local_0_15	,16
 counti		bc_write_local_0_15	,16
 
 
-countn		bc_repeat_var_init_n	,7Ah	;variable operator bytecodes
+countn		bc_set_incdec		,79h	;variable operator bytecodes
+
+count		bc_repeat_var_init_n
 count		bc_repeat_var_init_1
 count		bc_repeat_var_init
 count		bc_repeat_var_loop
@@ -1068,12 +1100,18 @@ count2		bc_regload
 count2		bc_call
 count2		bc_getregs
 count2		bc_setregs
-count2		bc_bytemove
 count2		bc_bytefill
-count2		bc_wordmove
+count2		bc_bytemove
+count2		bc_byteswap
+count2		bc_bytecomp
 count2		bc_wordfill
-count2		bc_longmove
+count2		bc_wordmove
+count2		bc_wordswap
+count2		bc_wordcomp
 count2		bc_longfill
+count2		bc_longmove
+count2		bc_longswap
+count2		bc_longcomp
 count2		bc_strsize
 count2		bc_strcomp
 count2		bc_strcopy
@@ -1089,7 +1127,9 @@ count2		bc_rotxy
 count2		bc_polxy
 count2		bc_xypol
 
-count2		bc_nan				;hub bytecodes, floating point
+count2		bc_float			;hub bytecodes, floating point
+count2		bc_trunc
+count2		bc_round
 count2		bc_fneg
 count2		bc_fabs
 count2		bc_fsqrt
@@ -1103,9 +1143,12 @@ count2		bc_fne
 count2		bc_fe
 count2		bc_flte
 count2		bc_fgte
-count2		bc_round
-count2		bc_trunc
-count2		bc_float
+count2		bc_nan
+
+count2		bc_pinread			;hub bytecodes, miscellaneous
+count2		bc_pinwrite
+count2		bc_pinstart
+count2		bc_pinclear
 ;
 ;
 ; Flex codes
@@ -1133,15 +1176,14 @@ flexcode	fc_getct,	bc_getct,	0,	1,	0,	0	;(also asm instruction)
 flexcode	fc_pollct,	bc_pollct,	1,	1,	0,	0
 flexcode	fc_waitct,	bc_waitct,	1,	0,	0,	0
 
-flexcode	fc_pinwrite,	bc_pinwrite,	2,	0,	1,	0
 flexcode	fc_pinlow,	bc_pinlow,	1,	0,	1,	0
 flexcode	fc_pinhigh,	bc_pinhigh,	1,	0,	1,	0
 flexcode	fc_pintoggle,	bc_pintoggle,	1,	0,	1,	0
 flexcode	fc_pinfloat,	bc_pinfloat,	1,	0,	1,	0
-flexcode	fc_pinread,	bc_pinread,	1,	1,	1,	0
-
-flexcode	fc_pinstart,	bc_pinstart,	4,	0,	1,	0
-flexcode	fc_pinclear,	bc_pinclear,	1,	0,	1,	0
+flexcode	fc_pinread,	bc_pinread,	1,	1,	1,	1
+flexcode	fc_pinwrite,	bc_pinwrite,	2,	0,	1,	1
+flexcode	fc_pinstart,	bc_pinstart,	4,	0,	1,	1
+flexcode	fc_pinclear,	bc_pinclear,	1,	0,	1,	1
 
 flexcode	fc_wrpin,	bc_wrpin,	2,	0,	1,	0	;(also asm instruction)
 flexcode	fc_wxpin,	bc_wxpin,	2,	0,	1,	0	;(also asm instruction)
@@ -1168,12 +1210,18 @@ flexcode	fc_call,	bc_call,	1,	0,	0,	1	;(also asm instruction)
 flexcode	fc_getregs,	bc_getregs,	3,	0,	0,	1
 flexcode	fc_setregs,	bc_setregs,	3,	0,	0,	1
 
-flexcode	fc_bytemove,	bc_bytemove,	3,	0,	0,	1
 flexcode	fc_bytefill,	bc_bytefill,	3,	0,	0,	1
-flexcode	fc_wordmove,	bc_wordmove,	3,	0,	0,	1
+flexcode	fc_bytemove,	bc_bytemove,	3,	0,	0,	1
+flexcode	fc_byteswap,	bc_byteswap,	3,	0,	0,	1
+flexcode	fc_bytecomp,	bc_bytecomp,	3,	1,	0,	1
 flexcode	fc_wordfill,	bc_wordfill,	3,	0,	0,	1
-flexcode	fc_longmove,	bc_longmove,	3,	0,	0,	1
+flexcode	fc_wordmove,	bc_wordmove,	3,	0,	0,	1
+flexcode	fc_wordswap,	bc_wordswap,	3,	0,	0,	1
+flexcode	fc_wordcomp,	bc_wordcomp,	3,	1,	0,	1
 flexcode	fc_longfill,	bc_longfill,	3,	0,	0,	1
+flexcode	fc_longmove,	bc_longmove,	3,	0,	0,	1
+flexcode	fc_longswap,	bc_longswap,	3,	0,	0,	1
+flexcode	fc_longcomp,	bc_longcomp,	3,	1,	0,	1
 
 flexcode	fc_strsize,	bc_strsize,	1,	1,	0,	1
 flexcode	fc_strcomp,	bc_strcomp,	2,	1,	0,	1
@@ -1303,11 +1351,11 @@ opc_hubcode	=	1 shl 30
 
 ;		oc		op		prec	bytecode	ternary	binary	unary	assign	float	alias	hubcode
 
-opcode		oc_bitnot,	op_bitnot,	0,	bc_bitnot,	0,	0,	1,	1,	0,	0,	0	; !	
+opcode		oc_bitnot,	op_bitnot,	0,	bc_bitnot,	0,	0,	1,	1,	0,	0,	0	; !
 opcode		oc_neg,		op_neg,		0,	bc_neg,		0,	0,	1,	1,	1,	0,	0	; -	(uses op_sub symbol)
 opcode		oc_fneg,	op_fneg,	0,	bc_fneg,	0,	0,	1,	0,	1,	0,	1	; -.	(uses op_fsub symbol)
-opcode		oc_abs,		op_abs,		0,	bc_abs,		0,	0,	1,	1,	1,	0,	0	; ABS	
-opcode		oc_fabs,	op_fabs,	0,	bc_fabs,	0,	0,	1,	0,	1,	0,	1	; FABS	
+opcode		oc_abs,		op_abs,		0,	bc_abs,		0,	0,	1,	1,	1,	0,	0	; ABS
+opcode		oc_fabs,	op_fabs,	0,	bc_fabs,	0,	0,	1,	0,	1,	0,	1	; FABS
 opcode		oc_encod,	op_encod,	0,	bc_encod,	0,	0,	1,	1,	0,	0,	0	; ENCOD
 opcode		oc_decod,	op_decod,	0,	bc_decod,	0,	0,	1,	1,	0,	0,	0	; DECOD
 opcode		oc_bmask,	op_bmask,	0,	bc_bmask,	0,	0,	1,	1,	0,	0,	0	; BMASK
@@ -1396,7 +1444,7 @@ count		dir_fit
 ;
 ; Ifs
 ;
-count0		if_never
+count0		if_ret
 count		if_nc_and_nz
 count		if_nc_and_z
 count		if_nc
@@ -1492,7 +1540,7 @@ symbol		dd	count dup (?)
 
 		call	enter_symbols_auto	;enter auto symbols
 
-		lea	eax,[error]		;return pointer to data structure
+		lea	eax,[error]		;return pointer to compiler data structure
 
 		pop	ebp
 		pop	edi
@@ -1503,7 +1551,7 @@ symbol		dd	count dup (?)
 		endp	P2InitStruct
 ;
 ;
-; Data structure
+; Compiler data structure
 ;
 dbx		error						;error boolean
 ddx		error_msg					;error message pointer
@@ -1553,7 +1601,7 @@ ddx		dat_offsets,file_limit				;data offsets
 ddx		dat_lengths,file_limit				;data lengths
 dbx		dat_data,obj_limit				;data data
 
-ddx		info_count					;info count
+ddx		info_count					;info count	(used by PropellerTool)
 ddx		info_start,info_limit				;info source start
 ddx		info_finish,info_limit				;info source finish
 ddx		info_type,info_limit				;info type
@@ -1820,6 +1868,9 @@ ddx		obj_stack_ptr					;recursion level
 error_aanawiac:	call	set_error
 		db	'ALIGNW/ALIGNL not allowed within inline assembly code',0
 
+error_acobd:	call	set_error
+		db	'_AUTOCLK can only be defined as an integer constant',0
+
 error_ainafbf:	call	set_error
 		db	'@ is not allowed for bitfields, use ^@ to get field pointer',0
 
@@ -1854,7 +1905,7 @@ error_caexl:	call	set_error
 		db	'Cog address exceeds $400 limit',0
 
 error_cfcobd:	call	set_error
-		db	'_CLKFREQ, _XTLFREQ, _XINFREQ, _RCFAST, _RCSLOW can only be defined as integer constants',0
+		db	'_CLKFREQ, _XTLFREQ, _XINFREQ, _ERRFREQ, _RCFAST, _RCSLOW can only be defined as integer constants',0
 
 error_cccbd:	call	set_error
 		db	'CLKMODE_ and CLKFREQ_ cannot be declared, since they are set by the compiler',0
@@ -1877,6 +1928,9 @@ error_cmbf0t255:call	set_error
 error_cmbf0t511:call	set_error
 		db	'Constant must be from 0 to 511',0
 
+error_cmbf1t15:	call	set_error
+		db	'Constant must be from 1 to 15',0
+
 error_codcssf:	call	set_error
 		db	'Conflicting or deficient _CLKFREQ/_XTLFREQ/_XINFREQ/_RCFAST/_RCSLOW symbols found',0
 
@@ -1886,8 +1940,8 @@ error_csmbla:	call	set_error
 error_dbz:	call	set_error
 		db	'Divide by zero',0
 
-error_dcbpbac:	call	set_error
-		db	'DEBUG cannot be preceded by a condition, except _RET_',0
+error_ddcobd:	call	set_error
+		db	'DEBUG_DISABLE can only be defined as an integer constant',0
 
 error_dditl:	call	set_error
 		db	'DEBUG data is too long',0
@@ -1910,14 +1964,35 @@ error_debugprx:	call	set_error
 error_debugbaud:call	set_error
 		db	'DEBUG_BAUD can only be defined as an integer constant',0
 
+error_debugclk:	call	set_error
+		db	'DEBUG requires at least 10 MHz of crystal/external clocking',0
+
 error_divo:	call	set_error
 		db	'Division overflow',0
+
+error_dmbmb:	call	set_error
+		db	'DEBUG mask bit-number must be 0..31',0
+
+error_dmcobd:	call	set_error
+		db	'DEBUG_MASK can only be defined as an integer constant',0
+
+error_dmmbd:	call	set_error
+		db	'DEBUG_MASK symbol must be defined for DEBUG[0..31] usage',0
 
 error_downbaud:	call	set_error
 		db	'DOWNLOAD_BAUD can only be defined as an integer constant',0
 
 error_drmbpppp:	call	set_error
 		db	'D register must be PA/PB/PTRA/PTRB',0
+
+error_dscobd:	call	set_error
+		db	'DAT structures can only be declared in ORGH mode',0
+
+error_dsdle:	call	set_error
+		db	'Data structure-definitions limit exceeded',0
+
+error_dsmbpbas:	call	set_error
+		db	'DAT structure must be preceded by a symbol',0
 
 error_eaaeoeol:	call	set_error
 		db	'Expected an assembly effect or end of line',0
@@ -1958,6 +2033,9 @@ error_eamoov:	call	set_error
 error_eaocom:	call	set_error
 		db	'Expected an object constant or method',0
 
+error_easmn:	call	set_error
+		db	'Expected a structure member name',0
+
 error_eassign:	call	set_error
 		db	'Expected ":="',0
 
@@ -1973,11 +2051,11 @@ error_eauon:	call	set_error
 error_eav:	call	set_error
 		db	'Expected a variable',0
 
-error_eaucnop:	call	set_error
-		db	'Expected a unique constant name or "#"',0
+error_eaucnpos:	call	set_error
+		db	'Expected a unique constant name, "#", or STRUCT',0
 
 error_eaunbwlo:	call	set_error
-		db	'Expected a unique name, BYTE, WORD, LONG, or assembly instruction',0
+		db	'Expected a unique name, "BYTE", "WORD", "LONG", or assembly instruction',0
 
 error_eaupn:	call	set_error
 		db	'Expected a unique parameter name',0
@@ -1988,17 +2066,32 @@ error_eaurn:	call	set_error
 error_eas:	call	set_error
 		db	'Expected a symbol',0
 
+error_easn:	call	set_error
+		db	'Expected a structure name',0
+
+error_eastott:	call	set_error
+		db	'Expected ":=", ":=:", "~", or "~~"',0
+
 error_eaumn:	call	set_error
 		db	'Expected a unique method name',0
+
+error_eausn:	call	set_error
+		db	'Expected a unique STRUCT name',0
 
 error_eauvn:	call	set_error
 		db	'Expected a unique variable name',0
 
 error_eauvnsa:	call	set_error
-		db	'Expected a unique variable name, BYTE, WORD, LONG, ALIGNW, or ALIGNL',0
+		db	'Expected a unique variable name, STRUCT name, "BYTE", "WORD", "LONG", "^", "ALIGNW", or "ALIGNL"',0
+
+error_ebackcmd:	call	set_error
+		db	'Expected "?", ".", "(", "$", "%", "#", or DEBUG command',0
 
 error_ebwl:	call	set_error
-		db	'Expected BYTE/WORD/LONG',0
+		db	'Expected "BYTE", "WORD", or "LONG"',0
+
+error_ebwls:	call	set_error
+		db	'Expected "BYTE", "WORD", "LONG", or STRUCT name',0
 
 error_ecoeol:	call	set_error
 		db	'Expected "," or end of line',0
@@ -2012,23 +2105,23 @@ error_ecomma:	call	set_error
 error_ecor:	call	set_error
 		db	'Expected "," or ")"',0
 
-error_debugclk:	call	set_error
-		db	'DEBUG requires at least 10 MHz of crystal/external clocking',0
-
 error_edot:	call	set_error
 		db	'Expected "."',0
 
 error_edotdot:	call	set_error
 		db	'Expected ".."',0
 
-error_eelcoeol:	call	set_error
-		db	'Expected "=" "[" "," or end of line',0
+error_eelcoeol:call	set_error
+		db	'Expected "=" "[" "," "(" or end of line',0
 
 error_eend:	call	set_error
 		db	'Expected END',0
 
 error_eeol:	call	set_error
 		db	'Expected end of line',0
+
+error_eeone:	call	set_error
+		db	'Expected "==" or "<>"',0
 
 error_eequal:	call	set_error
 		db	'Expected "="',0
@@ -2044,9 +2137,6 @@ error_eidbwloe:	call	set_error
 
 error_eitc:	call	set_error
 		db	'Expression is too complex',0
-
-error_eldppodc:	call	set_error
-		db	'Expected "(", "$", "%", "#", or DEBUG command',0
 
 error_eleft:	call	set_error
 		db	'Expected "("',0
@@ -2068,6 +2158,12 @@ error_epoeol:	call	set_error
 
 error_epound:	call	set_error
 		db	'Expected "#"',0
+
+error_eptr:	call	set_error
+		db	'Expected pointer variable',0
+
+error_eptrid:	call	set_error
+		db	'Expected pointer variable, "++", or "--"',0
 
 error_erb:	call	set_error
 		db	'Expected "}"',0
@@ -2141,6 +2237,18 @@ error_haec:	call	set_error
 error_hael:	call	set_error
 		db	'Hub address exceeds limit',0
 
+error_hsvi:	call	set_error
+		db	'Highest selectable Spin2 version is v', spin2_version / 10 + '0', spin2_version mod 10 + '0',0
+
+error_icaexl:	call	set_error
+		db	'Inline cog address exceeds $120 limit',0	;TESTT make sure address is up-to-date
+
+error_iccbl:	call	set_error
+		db	'Instance count cannot be less than 1',0
+
+error_icce:	call	set_error
+		db	'Instance count cannot exceed $10000',0
+
 error_idbn:	call	set_error
 		db	'Invalid double-binary number',0
 
@@ -2159,14 +2267,17 @@ error_inaifpe:	call	set_error
 error_internal:	call	set_error
 		db	'Internal',0
 
-error_iolmbbx:	call	set_error
-		db	'Inline origin/limit must be below $122',0	;TESTT make sure address is up-to-date
-
 error_ionaifpe:	call	set_error
 		db	'Integer operator not allowed in floating-point expression',0
 
+error_iscexb:	call	set_error
+		db	"Indexed structures cannot exceed $FFFF bytes in size",0
+
 error_isie:	call	set_error
 		db	'Inline section is empty',0
+
+error_level44:	call	set_error
+		db	'{Spin2_v44} is no longer supported due to changes in data structures beginning in v45',0
 
 error_litl:	call	set_error
 		db	'List is too large',0
@@ -2182,6 +2293,9 @@ error_loxoie:	call	set_error
 
 error_loxppme:	call	set_error
 		db	'Limit of 1024 PUB/PRI methods exceeded',0
+
+error_loxdsde:	call	set_error
+		db	'Limit of 4096 data structure definitions exceeded',0
 
 error_loxdse:	call	set_error
 		db	'Limit of 10k DAT symbols exceeded',0
@@ -2201,6 +2315,9 @@ error_loxpe:	call	set_error
 error_loxre:	call	set_error
 		db	'Limit of 15 results exceeded',0
 
+error_loxriee:	call	set_error
+		db	'Limit of 3 runtime index expressions exceeded',0
+
 error_loxuoe:	call	set_error
 		db	'Limit of 32 unique objects exceeded',0
 
@@ -2216,17 +2333,23 @@ error_loxuafe:	call	set_error
 error_lscmrf:	call	set_error
 		db	'LSTRING characters must range from 0 to 255',0
 
-error_lvmb:	call	set_error
-		db	'Local variable must be within first 16 longs',0
+error_lsvi:	call	set_error
+		db	'Lowest selectable Spin2 version is v41',0
 
-error_spmcrmv:	call	set_error
-		db	'SEND parameter methods cannot return multiple values',0
+error_lvmb:	call	set_error
+		db	'For access via inline assembly, a local variable must be either a long, a structure, or a pointer, and be both within the first 16 longs and long-aligned',0
 
 error_mpmblv:	call	set_error
-		db	'Method pointers must be long variables',0
+		db	'Method pointers must be long variables without bitfields',0
 
 error_nce:	call	set_error
 		db	'No cases encountered',0
+
+error_nchcor:	call	set_error
+		db	'NOP cannot have a condition or _RET_',0
+
+error_nmt4c:	call	set_error
+		db	'No more than 4 characters can be packed into a long',0
 
 error_npmf:	call	set_error
 		db	'No PUB method or DAT block found',0
@@ -2255,14 +2378,14 @@ error_omblc:	call	set_error
 error_os:	call	set_error
 		db	'Open string',0
 
-error_nchcor:	call	set_error
-		db	'NOP cannot have a condition or _RET_',0
-
-error_nmt4c:	call	set_error
-		db	'No more than 4 characters can be packed into a long',0
+error_oaocbats:	call	set_error
+		db	'Only @ operator can be applied to a structure',0
 
 error_onawiac:	call	set_error
 		db	'ORG not allowed within inline assembly code',0
+
+error_pcba:	call	set_error
+		db	'Pointers cannot be arrays',0
 
 error_pclo:	call	set_error
 		db	'PUB/CON list overflow',0
@@ -2303,6 +2426,9 @@ error_rcex:	call	set_error
 error_recvcbu:	call	set_error
 		db	'RECV() can be used only as a term and \RECV() is not allowed',0
 
+error_riabd:	call	set_error
+		db	'_RET_ is allowed before DEBUG, but not a condition',0
+
 error_rinah:	call	set_error
 		db	'Register is not allowed here',0
 
@@ -2312,14 +2438,20 @@ error_rinaiom:	call	set_error
 error_rpcx:	call	set_error
 		db	'Register parameter cannot exceed $3FF',0
 
-error_sdcx:	call	set_error
-		db	'@"string"/STRING/LSTRING data cannot exceed 254 bytes',0
-
 error_scmrf:	call	set_error
 		db	'STRING characters must range from 1 to 255',0
 
 error_sdcobu:	call	set_error
 		db	'Symbol _DEBUG can only be used as an integer constant',0
+
+error_sdcx:	call	set_error
+		db	'@"string"/STRING/LSTRING data cannot exceed 254 bytes',0
+
+error_sdnctn:	call	set_error
+		db	'Structure does not contain this name',0
+
+error_sehr:	call	set_error
+		db	'Structure exceeds hub range of $FFFFF',0
 
 error_sendcbu:	call	set_error
 		db	'SEND() can be used only as an instruction and \SEND() is not allowed',0
@@ -2330,6 +2462,9 @@ error_sexc:	call	set_error
 error_siad:	call	set_error
 		db	'Symbol is already defined',0
 
+error_simbf:	call	set_error
+		db	'Structure index must be from 0 to $FFFF',0
+
 error_smb0t1:	call	set_error
 		db	'Selector must be 0 to 1',0
 
@@ -2339,8 +2474,17 @@ error_smb0t3:	call	set_error
 error_smb0t7:	call	set_error
 		db	'Selector must be 0 to 7',0
 
+error_smbss:	call	set_error
+		db	'Structures must be same size',0
+
+error_spmcrmv:	call	set_error
+		db	'SEND parameter methods cannot return multiple values',0
+
 error_stif:	call	set_error
 		db	'Symbol table is full',0
+
+error_stosmne:	call	set_error
+		db	'Structures transferred on the stack must not exceed 15 longs',0
 
 error_tdcbpbas:	call	set_error
 		db	'This directive cannot be preceded by a symbol',0
@@ -2445,7 +2589,7 @@ _compile1:	mov	[error],1		;init error to true
 		call	reset_symbols_local	;reset local symbols
 		call	reset_symbols_inline	;reset inline symbols
 		call	write_symbols_main	;write main symbols
-		mov	[asm_local],30303030h	;reset asm local
+		mov	[asm_local],30303030h	;reset asm local to '0000'
 		mov	[pubcon_list_size],0	;reset pub/con list
 		mov	[list_length],0		;reset list length
 		mov	[doc_length],0		;reset doc length
@@ -2475,15 +2619,16 @@ _compile2:	mov	[error],1		;init error to true
 		call	determine_clock		;determine clock settings
 		call	compile_con_blocks_2nd	;compile con blocks, 2nd pass, plus obj/clock symbols
 		call	determine_bauds_pins	;determine bauds and debug pins
+		call	determine_debug_enables	;determine debug enables
 		call	compile_var_blocks	;compile var blocks
 		call	compile_dat_blocks	;compile dat blocks
 		call	compile_sub_blocks	;compile sub blocks
 		call	compile_obj_blocks	;compile obj blocks
 		call	distill_obj_blocks	;distill obj blocks
 
-		call	point_to_con		;point to first con block TESTT - why is this here?
+		call	point_to_con		;point to first con block in case error so "con" will be highlighted
 
-		call	collapse_debug_data	;collapse debug data if at bottom recursion level
+		call	collapse_debug_data	;collapse debug data if at top recursion level
 
 		call	print_obj		;print obj data
 
@@ -2587,6 +2732,11 @@ compile_done:	mov	[source_start],0	;reset source pointers
 ;
 ; Data
 ;
+ddx		struct_id_next
+ddx		struct_id_to_def,struct_id_limit
+ddx		struct_def_ptr
+dbx		struct_def,struct_def_limit
+
 ddx		var_ptr
 
 ddx		obj_count
@@ -2761,17 +2911,17 @@ print_symbol2:	push	eax
 		call	print_string
 		db	'TYPE: ',0
 
-		cmp	al,type_con
+		cmp	al,type_con_int
 		jb	@@notlist
 		cmp	al,type_method
 		ja	@@notlist
-		sub	al,type_con
+		sub	al,type_con_int
 		mov	ah,@@list2-@@list
 		mul	ah
 		movzx	eax,ax
 		lea	esi,[@@list+eax]
 		call	print_string_esi
-		jmp	@@typedone	
+		jmp	@@typedone
 @@notlist:
 		call	print_byte
 		call	print_string
@@ -2795,27 +2945,48 @@ print_symbol2:	push	eax
 		ret
 
 
-@@list:		db	'CON          ',0
-@@list2:	db	'CON_FLOAT    ',0
-		db	'REG          ',0
-		db	'LOC_BYTE     ',0
-		db	'LOC_WORD     ',0
-		db	'LOC_LONG     ',0
-		db	'VAR_BYTE     ',0
-		db	'VAR_WORD     ',0
-		db	'VAR_LONG     ',0
-		db	'DAT_BYTE     ',0
-		db	'DAT_WORD     ',0
-		db	'DAT_LONG     ',0
-		db	'DAT_LONG_RES ',0
-		db	'HUB_BYTE     ',0
-		db	'HUB_WORD     ',0
-		db	'HUB_LONG     ',0
-		db	'OBJ          ',0
-		db	'OBJPUB       ',0
-		db	'OBJCON       ',0
-		db	'OBJCON_FLOAT ',0
-		db	'METHOD       ',0
+@@list:		db	'CON_INT        ',0
+@@list2:	db	'CON_FLOAT      ',0
+		db	'CON_STRUCT     ',0
+		db	'REGISTER       ',0
+		db	'LOC_BYTE       ',0
+		db	'LOC_WORD       ',0
+		db	'LOC_LONG       ',0
+		db	'LOC_STRUCT     ',0
+		db	'LOC_BYTE_PTR   ',0
+		db	'LOC_WORD_PTR   ',0
+		db	'LOC_LONG_PTR   ',0
+		db	'LOC_STRUCT_PTR ',0
+		db	'               ',0	;type_loc_byte_ptr_val
+		db	'               ',0	;type_loc_word_ptr_val
+		db	'               ',0	;type_loc_long_ptr_val
+		db	'               ',0	;type_loc_struct_ptr_val
+		db	'VAR_BYTE       ',0
+		db	'VAR_WORD       ',0
+		db	'VAR_LONG       ',0
+		db	'VAR_STRUCT     ',0
+		db	'VAR_BYTE_PTR   ',0
+		db	'VAR_WORD_PTR   ',0
+		db	'VAR_LONG_PTR   ',0
+		db	'VAR_STRUCT_PTR ',0
+		db	'               ',0	;type_var_byte_ptr_val
+		db	'               ',0	;type_var_word_ptr_val
+		db	'               ',0	;type_var_long_ptr_val
+		db	'               ',0	;type_var_struct_ptr_val
+		db	'DAT_BYTE       ',0
+		db	'DAT_WORD       ',0
+		db	'DAT_LONG       ',0
+		db	'DAT_STRUCT     ',0
+		db	'DAT_LONG_RES   ',0
+		db	'HUB_BYTE       ',0
+		db	'HUB_WORD       ',0
+		db	'HUB_LONG       ',0
+		db	'OBJ            ',0
+		db	'OBJPUB         ',0
+		db	'OBJCON_INT     ',0
+		db	'OBJCON_FLOAT   ',0
+		db	'OBJCON_STRUCT  ',0
+		db	'METHOD         ',0
 ;
 ;
 ; Print hex
@@ -2877,7 +3048,7 @@ print_decimal:	push	ebx
 		jne	@@notcomma
 @@comma:	or	ebx,ebx			;yes, if no digit printed, print space
 		jz	@@space2
-		mov	al,','			;else, print comma
+		mov	al,'_'			;else, print underscore
 @@space2:	call	print_chr
 @@notcomma:	mov	eax,edx
 		loop	@@digit
@@ -2898,8 +3069,8 @@ print_string_esi:
 		push	eax
 
 @@loop:		lodsb
-		cmp	al,0
-		je	@@done
+		cmp	al,' '
+		jb	@@done
 		call	print_chr
 		jmp	@@loop
 @@done:
@@ -3059,10 +3230,15 @@ determine_level:
 		mov	ecx,[source_start]
 		je	@@scan
 @@end:
-		jecxz	@@none			;if position 0, done
+		or	ecx,ecx			;if position 0, done
+		jz	@@none
 
 		mov	esi,[source]		;point to start of file, ecx holds length
 @@check:	mov	ebx,0			;reset offset
+
+		mov	eax,esi			;set source_start in case error
+		sub	eax,[source]
+		mov	[source_start],eax
 
 		call	@@chr			;check for '{spin2_v##}' at each offset
 		cmp	al,'{'
@@ -3114,16 +3290,19 @@ determine_level:
 @@not:		inc	esi			;not '{spin2_v##}'
 		loop	@@check			;check from next chr until out of chrs
 
-@@none:		mov	dl,0			;default to earliest level
+@@none:		mov	dl,41			;default to earliest level
 
-@@got:		lea	esi,[@@levels]		;validate level
-@@pick:		lodsb
-		cmp	dl,al
-		jae	@@valid
-		cmp	[byte esi],0
-		jne	@@pick
+@@got:		add	[source_start],8	;set source_finish in case error
+		mov	eax,[source_start]
+		add	eax,2
+		mov	[source_finish],eax
 
-@@valid:	mov	[spin2_level],al	;save level
+		cmp	dl,41			;validate level
+		jb	error_lsvi
+		cmp	dl,spin2_version
+		ja	error_hsvi
+
+		mov	[spin2_level],dl	;save it
 		ret
 
 
@@ -3148,14 +3327,15 @@ determine_level:
 		ret
 
 
-@@levels:	db	43,41,0			;valid spin2 levels, latest to earliest
-
 dbx		spin2_level
 ;
 ;
 ; Compile con blocks
 ;
 compile_con_blocks_1st:
+
+		mov	[struct_id_next],0	;reset data structures
+		mov	[struct_def_ptr],0
 
 		mov	al,001b			;resolve initial symbols, first pass
 		call	compile_con_blocks
@@ -3172,7 +3352,7 @@ compile_con_blocks:
 
 		mov	[@@pass],al		;set pass
 
-@@nextpass:	call	reset_element		;reset element
+		call	reset_element		;reset element
 		jmp	@@autoblock
 
 @@nextblock:	mov	dl,block_con		;scan for con block
@@ -3189,7 +3369,7 @@ compile_con_blocks:
 
 @@sameline:	mov	[@@assign_flag],1	;set assign flag
 
-		cmp	al,type_con		;check for integer constant
+		cmp	al,type_con_int		;check for integer constant
 		je	@@constant
 		cmp	al,type_con_float	;check for float constant
 		je	@@constant
@@ -3197,39 +3377,41 @@ compile_con_blocks:
 		je	@@symbol
 		cmp	al,type_pound		;check for '#'
 		je	@@pound
+		cmp	al,type_struct		;check for 'STRUCT'
+		je	@@struct
 
 		cmp	al,type_block		;block?
-		jne	error_eaucnop
+		jne	error_eaucnpos
 		call	back_element		;yes, back up
 		jmp	@@nextblock		;resume scan for next con block
 
 
-@@constant:	cmp	[@@pass],001b		;constant, may be an already-assigned symbol
-		je	error_eaucnop		;if first pass, error
+@@constant:	cmp	[@@pass],001b		;constant, may be an already-assigned symbol (doesn't happen on %101)
+		je	error_eaucnpos		;if first pass, error
 		mov	[@@assign_flag],0	;not first pass, clear assign flag
 		mov	[@@assign_type],al	;save assign type and value for verification
 		mov	[@@assign_value],ebx
-
 
 @@symbol:	push	[source_start]		;symbol, set info source ptrs
 		pop	[inf_start]
 		push	[source_finish]
 		pop	[inf_finish]
 
-		call	backup_symbol		;backup constant name
+		call	backup_symbol		;backup constant symbol
 
 		mov	[@@float],0		;reset float flag
 
 		call	get_element		;get '=', '[', ',', or end
-		cmp	al,type_equal
+		cmp	al,type_equal		;name = value
 		je	@@equal
-		cmp	al,type_leftb
+		cmp	al,type_leftb		;name[enum_advance]
 		je	@@enumx
-		cmp	al,type_comma
+		cmp	al,type_comma		;name, (enum, more on line)
 		je	@@enuma
-		cmp	al,type_end
+		cmp	al,type_end		;name (enum, end of line)
 		je	@@enuma
 		jmp	error_eelcoeol
+
 
 @@equal:	mov	bl,[@@pass]		;symbol = value
 		call	try_value		;try to resolve value, errors if unresolved on last pass
@@ -3283,7 +3465,7 @@ compile_con_blocks:
 		shr	eax,8
 		call	pubcon_byte
 
-		mov	al,type_con		;enter constant symbol
+		mov	al,type_con_int		;enter constant symbol
 		add	al,[@@float]		;integer or float?
 		call	enter_symbol2_print
 		jmp	@@next
@@ -3292,7 +3474,7 @@ compile_con_blocks:
 		pop	[source_start]
 		push	[inf_finish]
 		pop	[source_finish]
-		mov	al,type_con
+		mov	al,type_con_int
 		add	al,[@@float]
 		cmp	[@@assign_type],al
 		jne	error_siad
@@ -3318,6 +3500,32 @@ compile_con_blocks:
 		jz	@@poundrightb
 		mov	[@@enum_valid],0
 @@poundrightb:	call	get_rightb
+		jmp	@@next			;get comma or end of line
+
+
+@@struct:	call	get_element		;'STRUCT', get structure name
+		cmp	al,type_con_struct	;already defined?
+		je	@@skipstruct
+		cmp	al,type_undefined	;must be undefined
+		jne	error_eausn
+
+		call	backup_symbol		;backup structure symbol
+		mov	ebx,[struct_id_next]	;is another structure definition allowed?
+		cmp	ebx,struct_id_limit
+		je	error_loxdsde
+		mov	eax,[struct_def_ptr]	;set struct_id_to_def
+		mov	[struct_id_to_def+ebx*4],eax
+		call	build_struct_record	;build structure-definition record in structure buffer
+		mov	al,type_con_struct	;enter structure symbol after build to avoid recursion
+		mov	ebx,[struct_id_next]
+		call	enter_symbol2_print
+		inc	[struct_id_next]	;increment next-structure id
+		jmp	@@next			;get comma or end of line
+
+@@skipstruct:	cmp	[@@pass],001b		;structure name, if first pass then already defined, error
+		je	error_eausn
+		call	get_left		;skip everything within and including parentheses
+		call	scan_to_right
 
 
 @@next:		call	get_comma_or_end	;get comma or end
@@ -3340,7 +3548,7 @@ compile_con_blocks:
 		ret
 
 @@param:	mov	[@@float],0		;symbol is a parameter
-		cmp	al,type_con
+		cmp	al,type_con_int
 		je	@@paramint
 		inc	[@@float]
 @@paramint:	mov	[@@assign_type],al
@@ -3467,7 +3675,7 @@ compile_obj_blocks_id:
 		call	get_equal		;get '='
 
 		call	get_value		;get type and value
-		mov	al,type_con
+		mov	al,type_con_int
 		jnc	@@notfloat
 		mov	al,type_con_float
 @@notfloat:	mov	[obj_param_types+edx],al
@@ -3540,10 +3748,21 @@ compile_sub_blocks_id:
 		call	check_right		;if ')', no parameters
 		je	@@noparams
 
-@@param:	call	get_element		;get parameter name, must be unique
-		cmp	al,type_undefined
+@@param:	mov	[@@size],1		;set default size
+		call	get_element		;get unique parameter name, struct, or '^'
+		call	check_con_struct_size	;struct? (eax=size)
+		jne	@@paramnstr
+		add	eax,11b			;struct, set size by rounding up to next long
+		shr	eax,2
+		mov	[@@size],eax
+		jmp	@@paramname
+@@paramnstr:	call	check_ptr		;check for ^byte/word/long/struct
+		jne	@@paramchk
+@@paramname:	call	get_element		;get unique structure parameter name
+@@paramchk:	cmp	al,type_undefined
 		jne	error_eaupn
-		inc	[@@params]		;inc parameter count
+		mov	eax,[@@size]		;advance parameter count
+		add	[@@params],eax
 		cmp	[@@params],params_limit
 		ja	error_loxpe
 		call	get_comma_or_right	;get comma or ')'
@@ -3553,10 +3772,21 @@ compile_sub_blocks_id:
 		call	check_colon		;check for ':' to signify result(s)
 		jne	@@noresults
 
-@@result:	call	get_element		;get result name, must be unique
-		cmp	al,type_undefined
+@@result:	mov	[@@size],1		;set default size
+		call	get_element		;get unique parameter name or struct
+		call	check_con_struct_size	;struct? (eax=size)
+		jne	@@resultnstr
+		add	eax,11b			;struct, set size by rounding up to next long
+		shr	eax,2
+		mov	[@@size],eax
+		jmp	@@resultname
+@@resultnstr:	call	check_ptr		;check for ^byte/word/long/struct
+		jne	@@resultchk
+@@resultname:	call	get_element		;get unique structure parameter name
+@@resultchk:	cmp	al,type_undefined
 		jne	error_eaurn
-		inc	[@@results]		;inc result count
+		mov	eax,[@@size]		;advance parameter count
+		add	[@@results],eax
 		cmp	[@@results],results_limit
 		ja	error_loxre
 		call	check_comma		;check for comma
@@ -3566,21 +3796,27 @@ compile_sub_blocks_id:
 		call	get_pipe_or_end		;get pipe or end
 		jne	@@nolocals
 
-@@local:	call	get_element		;get alignw/alignl, byte/word/long, or variable name
-		call	check_align		;alignw/alignl?
+@@local:	mov	[@@ptrflag],0		;clear ptr flag
+		call	get_element		;get alignw/alignl, {^}byte/word/long/struct, and/or variable name
+		call	check_align		;skip alignw/alignl
 		jne	@@noalign
 		call	get_element
-@@noalign:	cmp	al,type_size		;byte/word/long override?
-		jne	@@nosize
-		call	get_element		;get variable name
-@@nosize:	cmp	al,type_undefined	;verify variable name is unique
+@@noalign:	cmp	al,type_size		;byte/word/long?
+		je	@@getvar
+		call	check_con_struct_size	;struct?
+		je	@@getvar
+		call	check_ptr		;^byte/word/long/struct?
+		jne	@@gotvar
+		mov	[@@ptrflag],1		;set ptr flag
+@@getvar:	call	get_element		;{^}byte/word/long/struct, get a unique variable name
+@@gotvar:	cmp	al,type_undefined
 		jne	error_eauvnsa
-
 		call	check_leftb		;check for '[' to signify array
 		jne	@@noarray
+		cmp	[@@ptrflag],1		;got '[', error if ptr flag set
+		je	error_pcba
 		call	scan_to_rightb		;array, scan to ']'
-@@noarray:
-		call	get_comma_or_end	;get comma or end
+@@noarray:	call	get_comma_or_end	;get comma or end
 		je	@@local			;if comma, get next local
 @@nolocals:
 
@@ -3600,7 +3836,7 @@ compile_sub_blocks_id:
 		call	enter_symbol2_print
 
 		and	ebx,7FF00000h		;preserve parameter count and result count
-		or	ebx,80000000h		;set pub/sub flag
+		or	ebx,80000000h		;set pub/pri flag
 		mov	eax,ebx
 		call	enter_obj_long		;enter flag/params/results into index[31:20], index[19:0] will be set in future
 
@@ -3623,6 +3859,8 @@ dbx		@@first
 ddx		@@base
 ddx		@@params
 ddx		@@results
+ddx		@@size
+dbx		@@ptrflag
 ;
 ;
 ; Compile dat blocks - filenames only
@@ -3767,8 +4005,8 @@ compile_obj_symbols:
 		inc	[@@pub]			;next pub
 		jmp	@@enter			;enter symbol
 
-@@objcon:	sub	al,results_limit+1	;obj con, get type_objcon/type_objcon_float
-		add	al,type_objcon
+@@objcon:	sub	al,results_limit+1	;obj con, get type_objcon_int/type_objcon_float
+		add	al,type_objcon_int
 		push	eax			;get value
 		lodsd
 		mov	ebx,eax
@@ -3809,7 +4047,7 @@ compile_var_blocks:
 		cmp	[pasm_mode],1		;if pasm mode, done
 		je	@@ret
 
-		mov	[var_ptr],4		;reset variable pointer to accommodate long pointer to object
+		mov	[var_ptr],4		;start variable pointer at 4 to accommodate long pointer to object
 
 		call	reset_element		;reset element
 
@@ -3821,16 +4059,22 @@ compile_var_blocks:
 		cmp	al,type_end
 		je	@@nextline
 
-		call	check_align		;check for alignw/alignl
+@@checkalign:	call	check_align		;check for alignw/alignl
 		jne	@@notalign
 		call	@@align
 		jmp	@@nextline
 @@notalign:
-		cmp	al,type_size		;check for byte/word/long
-		je	@@size
+		mov	[@@value_overlay],0	;reset symbol value overlay in case not {^}struct
+		mov	[@@size],4		;set size to 4 in case long or ptr
 
-		cmp	al,type_undefined	;if new variable name, treat as long
-		mov	ecx,2
+		cmp	al,type_size		;byte/word/long?
+		je	@@bwl
+		call	check_con_struct_size	;struct? (eax=size)
+		je	@@struct
+		call	check_ptr		;ptr?
+		je	@@ptr
+		cmp	al,type_undefined	;if unique variable name, treat as long
+		mov	[@@type],type_var_long
 		je	@@newlong
 
 		cmp	al,type_block		;block?
@@ -3839,33 +4083,72 @@ compile_var_blocks:
 		jmp	@@nextblock		;resume scan for next var block
 
 
-@@size:		mov	ecx,ebx			;byte/word/long, get size in ecx
+@@bwl:		mov	al,type_var_byte	;byte/word/long, set type
+		add	al,bl
+		mov	[@@type],al
+		mov	cl,bl			;set 1/2/4 size
+		mov	eax,1
+		shl	eax,cl
+		mov	[@@size],eax
+		jmp	@@newname
 
-@@another:	call	get_element		;get new variable name
+@@struct:	mov	[@@type],type_var_struct	;struct
+		mov	[@@size],eax
+		jmp	@@structid
+
+@@ptr:		mov	ah,type_var_byte_ptr	;^byte/word/long/struct
+		add	ah,bl
+		mov	[@@type],ah
+		cmp	al,type_size
+		je	@@newname
+		mov	[@@type],type_var_struct_ptr
+@@structid:	shl	ebx,20
+		mov	[@@value_overlay],ebx	;set symbol value overlay to structure index
+
+
+@@newname:	call	get_element		;get unique variable name
 		cmp	al,type_undefined
 		jne	error_eauvn
 @@newlong:	call	backup_symbol
 
 		mov	ebx,1			;if no [count] specified, use 1
-		call	check_leftb
+		call	check_leftb		;check for '['
 		jne	@@nocount
-		call	get_value_int		;[count], get count
+		mov	al,[@@type]		;pointer cannot have [count]
+		call	is_ptr
+		je	error_pcba
+		call	get_value_int		;get count
 		cmp	ebx,obj_limit
-		call	@@checkabove
-		call	get_rightb
+		ja	@@error_tmvsid
+		call	get_rightb		;get ']'
 @@nocount:
-		shl	ebx,cl			;update var pointer
-		xchg	[var_ptr],ebx
-		add	[var_ptr],ebx
-		call	@@check
+		mov	eax,[@@size]		;update var pointer
+		mul	ebx
+		or	edx,edx
+		jnz	@@error_tmvsid
+		cmp	eax,obj_limit
+		jae	@@error_tmvsid
+		xchg	[var_ptr],eax
+		add	[var_ptr],eax
+		cmp	[var_ptr],obj_limit
+		jae	@@error_tmvsid
+		cmp	eax,obj_limit
+		jae	@@error_tmvsid
 
-		mov	al,type_var_byte	;enter symbol
-		add	al,cl
+		mov	ebx,eax			;enter symbol
+		or	ebx,[@@value_overlay]	;add any structure-index overlay data into symbol value
+		mov	al,[@@type]
 		call	enter_symbol2_print
 
-		call	get_comma_or_end	;get comma or end
-		je	@@another
-		jmp	@@nextline
+		call	get_comma_or_end	;get comma or end of line
+		jne	@@nextline		;if end of line, next line
+		call	get_element		;comma, get next element
+		jc	error_eauvnsa		;if eof, error
+		cmp	al,type_end		;if end, error
+		je	error_eauvnsa
+		cmp	al,type_undefined	;if unique variable name, enter as current type
+		je	@@newlong
+		jmp	@@checkalign		;else, get alignw/alignl or new type
 
 
 @@done:		mov	ecx,11b			;done, align to long
@@ -3875,9 +4158,16 @@ compile_var_blocks:
 		or	[var_ptr],ecx
 		inc	[var_ptr]
 @@check:	cmp	[var_ptr],obj_limit	;check size
-@@checkabove:	ja	error_tmvsid
-
+		jae	@@error_tmvsid
 @@ret:		ret
+
+
+@@error_tmvsid:	jmp	error_tmvsid		;too much variable space declared
+
+
+dbx		@@type
+ddx		@@size
+ddx		@@value_overlay
 ;
 ;
 ; Compile dat blocks
@@ -3972,17 +4262,40 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		call	@@entersymbol		;symbol only, enter symbol
 		jmp	@@nextline		;..and check next line
 @@notundef:
-		cmp	al,type_dat_byte	;if type_dat_byte/word/long/res..
+		cmp	al,type_dat_struct	;if type_dat_struct..
+		je	@@gotres
+		cmp	al,type_dat_long_res	;or type_dat_long_res..
+		je	@@gotres
+		cmp	al,type_dat_byte	;or type_dat_byte..type_dat_long..
 		jb	@@continue		;..and second pass, okay
-		cmp	al,type_dat_long_res
+		cmp	al,type_dat_long
 		ja	@@continue
-		call	@@asmlocal		;if not local symbol, inc asm local
+@@gotres:	call	@@asmlocal		;if not local symbol, inc asm local
 		cmp	[@@pass],0		;if pass 0, symbol redeclared
 		je	error_siad
 		call	get_element		;get next element
 		cmp	al,type_end		;if end, check next line
 		je	@@nextline
 @@continue:
+		cmp	al,type_con_struct	;check for type_con_struct
+		jne	@@notstruct
+		cmp	[@@pass],0		;if not pass 0, skip symbol entry
+		jne	@@structdone
+		cmp	[orgh],1		;if not orgh mode, error
+		jne	error_dscobd
+		or	edx,edx			;must be preceded by a symbol
+		jns	error_dsmbpbas
+		mov	al,type_dat_struct	;type = type_dat_struct
+		shl	ebx,32-12		;value = struct id in high bits and obj ptr in low bits
+		or	ebx,[obj_ptr]
+		mov	[inf_type],info_dat_symbol
+		mov	[inf_data0],ebx
+		mov	[byte inf_data1],3
+		call	enter_info		;enter dat symbol info
+		call	enter_symbol2_print	;enter symbol
+@@structdone:	call	get_end			;get end
+		jmp	@@nextline		;next line
+@@notstruct:
 		cmp	al,type_size		;check for size
 		je	@@data
 		cmp	al,type_size_fit	;check for size fit
@@ -4050,14 +4363,16 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		je	@@datafvars
 		test	eax,0E0000000h		;fvar must have three msb's clear
 		jnz	error_fvar
-		call	compile_rfvar
+		lea	esi,[@@enterbyte]
+		call	compile_rfvar_dat
 		jmp	@@datanext
 @@datafvars:	mov	ebx,eax			;fvars must have four msb's same
 		sar	ebx,32-4
 		jz	@@datafvarsok
 		inc	ebx
 		jnz	error_fvar
-@@datafvarsok:	call	compile_rfvars
+@@datafvarsok:	lea	esi,[@@enterbyte]
+		call	compile_rfvars_dat
 		jmp	@@datanext
 @@datanor:	call	back_element		;no size override, back up
 		mov	dl,[@@size]
@@ -4246,7 +4561,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		or	edx,40000000h		;set res symbol flag
 		call	@@entersymbol		;enter any symbol
 		call	@@getvalueint		;get value
-		cmp	ebx,400h
+		cmp	ebx,400h		;make sure not negative
 		ja	error_cael
 		shl	ebx,2			;make byte address
 		add	[cog_org],ebx		;update org
@@ -4371,10 +4686,10 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	@@trys_imm
 
 
-@@op_bitx:	call	@@tryd			;inst d,s/# {wc,wz or none)
+@@op_bitx:	call	@@tryd			;inst d,s/# {wcz or none)
 		call	get_comma
 		call	@@trys_imm
-		jmp	@@get_wcwz
+		jmp	@@get_wcz
 
 
 @@op_testb:	call	@@tryd			;inst d,s/# (wc/andc/orc/xorc or wz/andz/orz/xorz}
@@ -4520,7 +4835,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		ret
 
 
-@@op_rep:	call	check_at		;check @
+@@op_rep:	call	check_at		;rep d/#/@,s/#
 		jne	@@op_ls			;if not @, handle d/#,s/#
 		or	ecx,1 shl 19		;set d-immediate bit
 		call	@@tryvalueint		;@, get cog/lut address
@@ -4672,7 +4987,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		and	ebx,11b
 		xor	ebx,10b
 		shl	ebx,21
-		or	ecx,ebx	
+		or	ecx,ebx
 @@op_locs:	call	get_comma		;get ','
 		call	get_pound		;get '#'
 		call	check_back		;check for '\'
@@ -4759,9 +5074,9 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	@@get_wcwzwcz
 
 
-@@op_pinop:	mov	edx,1 shl 18		;pinop d/#0..511 (wc,wz or none)
+@@op_pinop:	mov	edx,1 shl 18		;pinop d/#0..511 (wcz or none)
 		call	@@tryd_imm
-		jmp	@@get_wcwz
+		jmp	@@get_wcz
 
 
 @@op_testp:	mov	edx,1 shl 18		;testp d/#0..511 (wc/andc/orc/xorc or wz/andz/orz/xorz}
@@ -4788,7 +5103,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 
 @@op_xlat:	movzx	eax,cl			;get index number
 		and	ecx,0F0000000h		;preserve conditional bits
-		or	ecx,[@@xlat+eax*4]	;or in instruction
+		or	ecx,[@@xlat+eax*4]	;or instruction in
 		ret
 
 @@xlat		dd	0D64002Dh		;RET
@@ -4810,7 +5125,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	@@trys_imm
 
 
-@@op_asmclk:	mov	ebx,[clkmode]		;asmclk, check if rcfast/rcslow
+@@op_asmclk:	mov	ebx,[clkmode]		;asmclk, check if rcfast/rcslow - TESTT _RET_ needs to be handled properly
 		test	bl,10b
 		jnz	@@asmclkxin
 		and	ebx,1
@@ -4819,7 +5134,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		or	ecx,0D640000h		;rcfast/rcslow, assemble 'hubset #0/1'
 		ret
 
-@@asmclkxin:	and	ebx,0FFFFFFFCh		;assemble 'hubset ##clkmode & !3'
+@@asmclkxin:	and	ebx,0FFFFFFFCh		;assemble 'hubset ##clkmode & $FFFFFFFC'
 		stc
 		call	@@augds
 		push	ecx
@@ -4859,10 +5174,10 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		shr	eax,32-4
 		jz	@@debugretok
 		cmp	al,0Fh
-		jne	error_dcbpbac
+		jne	error_riabd
 @@debugretok:
-		cmp	[debug_mode],0		;if debug disabled, ignore rest of line and emit nothing
-		jnz	@@debugon
+		call	check_debug		;if debug disabled, ignore rest of line and emit nothing
+		je	@@debugon
 		call	scan_to_end		;scan to end of line
 		call	get_end			;get end
 		pop	eax			;pop return address so no long is emitted
@@ -4871,8 +5186,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		call	check_left		;check for '('
 		je	@@debugleft
 
-		and	ecx,0FFFFFFFFh		;no parameters, assemble 'BRK #0' for debugger
-		or	ecx,00D640036h
+		or	ecx,1 shl 18		;no parameters, assemble 'BRK #0' for debugger
 		call	get_end			;make sure eol
 		jmp	back_element
 
@@ -5187,7 +5501,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	error_ewcwzwcz
 
 
-@@get_wcwz:	call	get_element		;get wcz or nothing
+@@get_wcz:	call	get_element		;get wcz or nothing
 		cmp	al,type_asm_effect	;if not flag effect, done
 		jne	back_element
 		cmp	bl,11b			;if not wcz, done
@@ -5430,7 +5744,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		ja	@@chkpab_err6b
 @@chkpab_nupn:	and	dl,0C0h
 		and	bl,3Fh
-		jmp	@@chkpab_or	
+		jmp	@@chkpab_or
 @@chkpab_ok:	and	dl,0E0h			;install ptr index
 		and	bl,1Fh
 @@chkpab_or:	or	dl,bl
@@ -5480,9 +5794,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		ret
 
 
-@@checkcross:	cmp	[@@pass],0		;make sure relative branches do not cross cog/lut <--> hub
-		je	@@checkcrossx
-		cmp	[orgh],1
+@@checkcross:	cmp	[orgh],1		;make sure relative branches do not cross cog/lut <--> hub
 		je	@@checkcrossh
 
 		cmp	ebx,400h
@@ -5491,7 +5803,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 
 @@checkcrossh:	cmp	ebx,400h
 		jb	error_racc
-@@checkcrossx:	ret
+		ret
 
 
 @@enterinfo:	cmp	[@@infoflag],0		;enter any info
@@ -5578,32 +5890,82 @@ compile_sub_blocks:
 		call	check_right		;if ')', no parameters
 		je	@@noparams
 
-@@parameter:	call	get_element		;get parameter name
-		cmp	al,type_undefined	;make sure unique
+@@parameter:	mov	[@@size],4		;set default parameter size
+		mov	[@@type],type_loc_long	;set default parameter type
+		mov	[@@value_overlay],0	;clear value overlay in case not {^}struct
+		call	get_element		;get unique parameter name, struct, or '^'
+		call	check_con_struct_size	;struct? (eax=size)
+		jne	@@paramnstr
+		add	eax,11b			;struct, set size by rounding up to next long
+		shr	eax,2
+		shl	eax,2
+		mov	[@@size],eax
+		mov	[@@type],type_loc_struct
+		jmp	@@paramstrid
+@@paramnstr:	call	check_ptr		;check for ^byte/word/long/struct
+		jne	@@paramchk
+		cmp	al,type_size
+		jne	@@paramstrptr
+		mov	al,type_loc_byte_ptr
+		add	al,bl
+		mov	[@@type],al
+		jmp	@@paramname
+@@paramstrptr:	mov	[@@type],type_loc_struct_ptr
+@@paramstrid:	shl	ebx,20
+		mov	[@@value_overlay],ebx
+@@paramname:	call	get_element		;get unique parameter name
+@@paramchk:	cmp	al,type_undefined
 		jne	error_eaupn
-		call	backup_symbol		;enter local symbol, update pointer
-		mov	al,type_loc_long
+		call	backup_symbol		;enter local symbol
+		mov	al,[@@type]
 		mov	ebx,[@@local]
+		or	ebx,[@@value_overlay]
 		call	enter_symbol2_print
-		add	[@@local],4
+		mov	eax,[@@size]
+		add	[@@local],eax
 		call	get_comma_or_right	;get comma or ')'
 		je	@@parameter
 @@noparams:
 
 		call	check_colon		;check for ':' to signify result(s)
-		jne	@@noresult
+		jne	@@noresults
 
-@@result:	call	get_element		;get result name
-		cmp	al,type_undefined	;make sure unique
+@@result:	mov	[@@size],4		;set default result size
+		mov	[@@type],type_loc_long	;set default result type
+		mov	[@@value_overlay],0	;clear value overlay in case not struct
+		call	get_element		;get unique result name or struct
+		call	check_con_struct_size	;struct? (eax=size)
+		jne	@@resultnstr
+		add	eax,11b			;struct, set size by rounding up to next long
+		shr	eax,2
+		shl	eax,2
+		mov	[@@size],eax
+		mov	[@@type],type_loc_struct
+		jmp	@@resultstrid
+@@resultnstr:	call	check_ptr		;check for ^byte/word/long/struct
+		jne	@@resultchk
+		cmp	al,type_size
+		jne	@@resultstrptr
+		mov	al,type_loc_byte_ptr
+		add	al,bl
+		mov	[@@type],al
+		jmp	@@resultname
+@@resultstrptr:	mov	[@@type],type_loc_struct_ptr
+@@resultstrid:	shl	ebx,20
+		mov	[@@value_overlay],ebx
+@@resultname:	call	get_element		;get unique result name
+@@resultchk:	cmp	al,type_undefined
 		jne	error_eaurn
-		call	backup_symbol		;enter local symbol, update pointer
-		mov	al,type_loc_long
+		call	backup_symbol		;enter local symbol
+		mov	al,[@@type]
 		mov	ebx,[@@local]
+		or	ebx,[@@value_overlay]
 		call	enter_symbol2_print
-		add	[@@local],4
+		mov	eax,[@@size]
+		add	[@@local],eax
 		call	check_comma		;check for comma
 		je	@@result
-@@noresult:
+@@noresults:
 
 		push	[@@local]		;set local variable base
 		pop	[@@localvar]
@@ -5612,7 +5974,11 @@ compile_sub_blocks:
 		jne	@@novariables
 
 
-@@variable:	call	get_element		;get alignw/alignl, byte/word/long, or unique variable
+@@variable:	mov	[@@size],4		;set default variable size
+		mov	[@@type],type_loc_long	;set default variable type
+		mov	[@@value_overlay],0	;clear value overlay in case not struct
+
+		call	get_element		;get alignw/alignl, {^}byte/word/long/struct, and/or unique variable name
 
 		call	check_align		;alignw/alignl?
 		jne	@@noalign
@@ -5623,35 +5989,63 @@ compile_sub_blocks:
 @@aligned:	call	get_element
 @@noalign:
 		cmp	al,type_size		;byte/word/long?
-		mov	cl,type_loc_long	;default variable size is long
-		jne	@@nosize
+		jne	@@varnotsize
+		mov	al,type_loc_byte
+		add	al,bl
+		mov	[@@type],al
 		mov	cl,bl
-		add	cl,type_loc_byte
-		call	get_element		;get variable
-@@nosize:
-		cmp	al,type_undefined	;check variable name
+		mov	eax,1
+		shl	eax,cl
+		mov	[@@size],eax
+		jmp	@@varname
+@@varnotsize:
+		call	check_con_struct_size	;struct? (eax=size)
+		jne	@@varnotstruct
+		mov	[@@size],eax
+		mov	[@@type],type_loc_struct
+		jmp	@@varstructid
+@@varnotstruct:
+		call	check_ptr		;^byte/word/long/struct?
+		jne	@@varnamechk
+		cmp	al,type_size
+		jne	@@varstructptr
+		mov	al,type_loc_byte_ptr
+		add	al,bl
+		mov	[@@type],al
+		jmp	@@varname
+@@varstructptr:	mov	[@@type],type_loc_struct_ptr
+@@varstructid:	shl	ebx,20
+		mov	[@@value_overlay],ebx
+
+@@varname:	call	get_element		;get unique variable name
+@@varnamechk:	cmp	al,type_undefined
 		jne	error_eauvnsa
-		call	backup_symbol		;backup variable name
-		mov	al,cl			;enter variable symbol
+		call	backup_symbol		;enter local symbol
+		mov	al,[@@type]
 		mov	ebx,[@@local]
+		or	ebx,[@@value_overlay]
 		call	enter_symbol2_print
 
-		mov	edx,1			;ready default count
-		call	check_leftb		;check for '[' to signify array
-		jne	@@notarray
-		call	get_value_int		;get array count, check limit
-		mov	edx,ebx
-		cmp	edx,locals_limit
-		ja	error_loxlve
-		call	get_element		;skip ']' (vetted by compile_sub_blocks_id)
-@@notarray:
-		sub	cl,type_loc_byte	;scale count by size
-		shl	edx,cl
-		add	cl,type_loc_byte
-
-		add	[@@local],edx		;add to local pointer
-		cmp	[@@local],locals_limit	;check limit
-		ja	error_loxlve
+		mov	ebx,1			;if no [count] specified, use 1
+		call	check_leftb		;'['?
+		jne	@@nocount		;(already disallowed for ^byte/word/long/struct)
+		call	get_value_int		;get count
+		cmp	ebx,locals_limit
+		ja	@@error_loxlve
+		call	get_rightb		;get ']'
+@@nocount:
+		mov	eax,[@@size]		;update local variable pointer
+		mul	ebx
+		or	edx,edx
+		jnz	@@error_loxlve
+		cmp	eax,locals_limit
+		jae	@@error_loxlve
+		xchg	[@@local],eax
+		add	[@@local],eax
+		cmp	[@@local],locals_limit
+		jae	@@error_loxlve
+		cmp	eax,locals_limit
+		jae	@@error_loxlve
 
 		call	get_comma_or_end	;get comma or end
 		je	@@variable		;if comma, get next variable
@@ -5688,10 +6082,12 @@ compile_sub_blocks:
 		call	reset_symbols_local	;cancel local symbols
 		call	write_symbols_main
 
-		jmp	@@nextblock		;get next block
+		jmp	@@nextblock		;get next PUB/PRI block
 
 @@done:		ret
 
+
+@@error_loxlve:	jmp	error_loxlve
 
 @@enteroffset:	mov	ebx,[@@sub]		;enter offset into index
 		and	ebx,0FFFFFh
@@ -5700,6 +6096,9 @@ compile_sub_blocks:
 		ret
 
 
+dbx		@@type
+ddx		@@size
+ddx		@@value_overlay
 dbx		@@block
 ddx		@@sub
 ddx		@@local
@@ -5778,6 +6177,159 @@ distill_obj_blocks:
 @@done:		ret
 ;
 ;
+; Build struct-definition record
+;
+;   symbol2 must hold struct name with get_element ready to get '('
+;   struct_def_ptr must point to offset in struct_def of next struct definition
+;
+;
+; struct_name({byte/word/long/struct} member_name{[count]}, ...)
+;
+;	struct element
+;	--------------
+;	type = type_con_struct
+;	value = struct id
+;
+;	struct record
+;	-------------
+;	long: size_of_struct
+;	byte: struct_name length
+;	byte: "struct_name"
+;	member record(s)
+;	    long: member offset address
+;	    byte: type (0=byte, 1=word, 2=long, 3=struct + word: struct_id)
+;	    byte: member_name length
+;	    byte(s): "member_name"
+;	    byte: 1 if another member, 0 if end of record
+;
+build_struct_record:
+
+		call	get_left			;get '('
+
+		mov	eax,[struct_def_ptr]		;save start address for size patching
+		mov	[@@start],eax
+
+		mov	ebx,0				;enter long to reserve space for size patch
+		call	@@enter_long
+
+		lea	edi,[symbol2]			;get struct name length into ecx
+		call	measure_symbol
+		lea	esi,[symbol2]			;enter struct name
+		call	@@enter_name
+
+		mov	[@@offset],0			;reset offset address
+
+@@member:	mov	ebx,[@@offset]			;(another) member, enter offset
+		call	@@enter_long
+
+		call	get_element			;get byte/word/long/struct or name
+
+		cmp	al,type_size			;byte/word/long?
+		jne	@@notsize
+		call	@@enter_byte			;enter 0/1/2 for byte/word/long
+		mov	cl,bl				;size is 1/2/4
+		mov	ebx,1
+		shl	ebx,cl
+		mov	[@@size],ebx
+		jmp	@@getname
+@@notsize:
+		cmp	al,type_con_struct		;struct name?
+		jne	@@notstruct
+		push	ebx				;save offset of struct record
+		mov	bl,3				;enter 3 for struct
+		call	@@enter_byte
+		pop	ebx
+		call	@@enter_word			;enter struct id
+		mov	ebx,[struct_id_to_def+ebx*4]	;get struct size from definition
+		mov	ebx,[dword struct_def+ebx]
+		mov	[@@size],ebx			;set size
+		jmp	@@getname
+@@notstruct:
+		mov	bl,2				;no byte/word/long/struct, default to long
+		call	@@enter_byte			;enter 2 for long
+		mov	[@@size],4			;size is 4
+		call	back_element			;back up to get name again
+
+@@getname:	call	get_symbol			;get member name
+		jc	error_eas
+		lea	esi,[symbol]			;enter member name
+		call	@@enter_name
+
+		mov	ebx,1				;if no [count] specified, use 1
+		call	check_leftb			;'['?
+		jne	@@gotcount
+		call	get_value_int			;get count
+		cmp	ebx,1				;check instance count >= 1
+		jl	error_iccbl
+		je	@@justone			;if more than one instance..
+		cmp	[@@size],0FFFFh			;..make sure indexed struct <= $FFFF bytes
+		ja	error_iscexb
+		cmp	ebx,10000h			;ensure instance count <= $10000 (0..$FFFF)
+		ja	error_icce
+@@justone:	call	get_rightb			;get ']'
+@@gotcount:
+		mov	eax,[@@size]			;multiply instance count by size
+		mul	ebx
+		or	edx,edx
+		jnz	@@error_sehr
+		cmp	eax,obj_limit
+		ja	@@error_sehr
+		add	[@@offset],eax			;update offset
+		cmp	[@@offset],obj_limit
+		jae	@@error_sehr
+
+		call	get_comma_or_right		;get comma or ')'
+		mov	bl,1
+		je	@@more
+		mov	bl,0
+@@more:		call	@@enter_byte			;enter 1 if more or 0 if done
+		cmp	bl,1
+		je	@@member
+
+		mov	eax,[@@start]			;patch size into start of record
+		mov	ebx,[@@offset]
+		mov	[dword struct_def+eax],ebx
+
+		ret
+
+
+@@error_sehr:	jmp	error_sehr			;error, structure exceeds hub range
+
+@@enter_name:	mov	bl,cl				;enter name length
+		call	@@enter_byte
+@@enter_name2:	lodsb					;enter name characters
+		mov	bl,al
+		call	@@enter_byte
+		loop	@@enter_name2
+		ret
+
+@@enter_long:	call	@@enter_word
+		ror	ebx,16
+		call	@@enter_word
+		ror	ebx,16
+		ret
+
+@@enter_word:	call	@@enter_byte
+		xchg	bl,bh
+		call	@@enter_byte
+		xchg	bl,bh
+		ret
+
+@@enter_byte:	push	eax
+		mov	eax,[struct_def_ptr]
+		cmp	eax,struct_def_limit
+		je	error_dsdle
+		mov	[struct_def+eax],bl
+		inc	[struct_def_ptr]
+		pop	eax
+		ret
+
+
+ddx		@@start
+ddx		@@offset
+ddx		@@size
+;
+;
 ; Collapse DEBUG data
 ;
 collapse_debug_data:
@@ -5785,7 +6337,7 @@ collapse_debug_data:
 		cmp	[debug_mode],0		;if not debug mode, exit
 		je	@@done
 
-		cmp	[obj_stack_ptr],1	;if not bottom recursion level, exit
+		cmp	[obj_stack_ptr],1	;if not top recursion level, exit
 		jne	@@done
 
 		xor	edx,edx			;find first empty debug table entry
@@ -5872,17 +6424,17 @@ compile_final:	mov	[size_flash_loader],flash_loader_end-flash_loader	;set size_f
 determine_bauds_pins:
 
 		lea	esi,[@@symlbaud]	;check for 'download_baud' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		ja	error_downbaud		;if defined (c=0) and not integer (z=0), then error
 		jc	@@nosymlbaud
 		mov	[download_baud],ebx
 @@nosymlbaud:
 		lea	esi,[@@sympin]		;check for 'debug_pin' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		ja	error_debugpin		;if defined (c=0) and not integer (z=0), then error
 		jnc	@@gotsympintx
 		lea	esi,[@@sympintx]	;check for 'debug_pin_tx' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		ja	error_debugptx		;if defined (c=0) and not integer (z=0), then error
 		jnc	@@gotsympintx
 		mov	bl,62			;not defined, use 62
@@ -5890,7 +6442,7 @@ determine_bauds_pins:
 		mov	[debug_pin_tx],bl
 
 		lea	esi,[@@sympinrx]	;check for 'debug_pin_rx' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		ja	error_debugprx		;if defined (c=0) and not integer (z=0), then error
 		jnc	@@gotsympinrx
 		mov	bl,63			;not defined, use 63
@@ -5898,7 +6450,7 @@ determine_bauds_pins:
 		mov	[debug_pin_rx],bl
 
 		lea	esi,[@@symdbaud]	;check for 'debug_baud' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		ja	error_debugbaud		;if defined (c=0) and not integer (z=0), then error
 		jnc	@@gotsymdbaud
 		mov	ebx,[download_baud]	;not defined, use download_baud
@@ -5935,7 +6487,7 @@ determine_bauds_pins:
 		ret
 
 
-@@hostsymbol:	call	check_debug_symbol	;check for host-side symbol
+@@hostsymbol:	call	check_setup_symbol	;check for host-side symbol
 		jnc	@@hostsymbolok
 		mov	ebx,ecx
 @@hostsymbolok:	mov	[edi],ebx
@@ -5959,11 +6511,47 @@ determine_bauds_pins:
 @@symoff:	db	'DEBUG_WINDOWS_OFF',0
 ;
 ;
-; Check for DEBUG-related symbol
+; Determine DEBUG enables
+;
+determine_debug_enables:
+
+		lea	esi,[@@debug_disable]			;look up DEBUG_DISABLE symbol
+		call	check_setup_symbol
+		mov	cl,0					;default to not disabled
+		jc	@@notdisabled				;if undefined, not disabled
+		jne	error_ddcobd				;if not integer, error
+		or	ebx,ebx					;if not zero, enabled
+		jz	@@notdisabled
+		mov	cl,1					;not zero, disabled
+@@notdisabled:	mov	[debug_disable],cl
+
+		lea	esi,[@@debug_mask]			;look up DEBUG_MASK symbol
+		call	check_setup_symbol
+		mov	cl,0					;default to debug mask undefined
+		jc	@@undefined				;undefined?
+		jne	error_dmcobd				;if not integer, error
+		mov	cl,1					;debug mask defined
+		mov	[debug_mask],ebx			;set debug mask
+@@undefined:	mov	[debug_mask_defined],cl
+
+		ret
+
+
+
+@@debug_disable:db	'DEBUG_DISABLE',0
+@@debug_mask:	db	'DEBUG_MASK',0
+
+
+dbx		debug_disable
+dbx		debug_mask_defined
+ddx		debug_mask
+;
+;
+; Check for setup-related symbol
 ; esi must point to symbol name
 ; c=1 if undefined, else ebx=value and z=0 if not integer constant
 ;
-check_debug_symbol:
+check_setup_symbol:
 
 		push	ecx			;check if symbol defined
 		push	edi
@@ -5974,7 +6562,7 @@ check_debug_symbol:
 		cmp	al,type_undefined
 		stc				;c=1 if undefined
 		je	@@nosymbol
-		cmp	al,type_con
+		cmp	al,type_con_int
 		clc				;c=0 if defined, z=0 if not integer constant
 @@nosymbol:	pop	edi
 		pop	ecx
@@ -6058,9 +6646,9 @@ insert_interpreter:
 @@var_longs	=	3Ch
 @@clkmode_hub	=	40h
 @@clkfreq_hub	=	44h
-@@_debugnop1_	=	0E54h
-@@_debugnop2_	=	0E58h
-@@_debugnop3_	=	0E5Ch
+@@_debugnop1_	=	0EDCh
+@@_debugnop2_	=	0EE0h
+@@_debugnop3_	=	0EE4h
 
 interpreter:	include	"Spin2_interpreter.inc"
 interpreter_end:
@@ -6105,23 +6693,23 @@ insert_debugger:
 		mov	[dword obj+@@_clkmode1_],eax
 
 		lea	esi,[@@symcogs]			;check for 'debug_cogs' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		jc	@@nosymcogs
 		jne	error_debugcog
 		mov	[obj+@@_hubset_],bl
 @@nosymcogs:
 		lea	esi,[@@symcoginit]		;check for 'debug_coginit' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		jc	@@nosymcoginit
 		mov	[dword obj+@@_brkcond_],110h
 @@nosymcoginit:
 		lea	esi,[@@symmain]			;check for 'debug_main' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		jc	@@nosymmain
 		mov	[dword obj+@@_brkcond_],001h
 @@nosymmain:
 		lea	esi,[@@symdelay]		;check for 'debug_delay' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		jc	@@nosymdelay
 		jne	error_debugdly
 		mov	eax,[clkfreq]
@@ -6144,7 +6732,7 @@ insert_debugger:
 		mov	[dword obj+@@_baud_],eax
 
 		lea	esi,[@@symtimestamp]		;check for 'debug_timestamp' symbol
-		call	check_debug_symbol
+		call	check_setup_symbol
 		jc	@@nosymstamp
 		or	[obj+@@_rxpin_+3],80h		;indicate timestamp in msb of _rxpin_
 @@nosymstamp:
@@ -6217,6 +6805,14 @@ flash_loader_end:
 ;
 insert_clock_setter:
 
+		lea	esi,[@@sym]				;look up _AUTOCLK symbol
+		call	check_setup_symbol
+		jc	@@continue				;if undefined, proceed
+		jne	error_acobd				;if not integer, error
+		or	ebx,ebx					;if zero, don't insert clock setter
+		je	@@done
+@@continue:
+
 		cmp	[clkmode],00b				;if RCFAST mode, nothing to do
 		je	@@done
 
@@ -6248,6 +6844,9 @@ insert_clock_setter:
 		mov	[dword obj+@@_appblocks_],eax
 
 @@done:		ret
+
+
+@@sym:		db	'_AUTOCLK',0
 
 
 @@_ext1_	=	000h
@@ -6291,7 +6890,7 @@ move_obj_up:	push	ecx
 		ret
 ;
 ;
-; Pad obj to next long alignment 
+; Pad obj to next long alignment
 ;
 pad_obj_long:	push	eax
 
@@ -6381,10 +6980,16 @@ determine_clock:
 		cmp	al,000001b		;_RCSLOW ?
 		je	@@rcs
 
-		cmp	al,000000b		;if no symbol, use _RCFAST
-		je	@@rcf
+		cmp	al,000000b		;if no symbol, use default mode
+		je	@@default
 
-		jmp	error_codcssf
+		jmp	error_codcssf		;error, conflicting or deficient clock symbols found
+
+
+@@default:	cmp	[debug_mode],0		;default to _RCFAST if not debug mode
+		je	@@rcf
+		mov	[@@xtlfreq],20000000	;debug mode, set _XTLFREQ to 20 MHz
+		jmp	@@xtl
 
 
 @@clk:		mov	[clkmode],1011b		;_CLKFREQ	(assumes 20 MHz crystal)
@@ -6437,12 +7042,12 @@ determine_clock:
 		mov	[xinfreq],0
 
 
-@@done:		mov	al,type_con		;enter CLKMODE_ symbol
+@@done:		mov	al,type_con_int		;enter CLKMODE_ symbol
 		mov	ebx,[clkmode]
 		lea	esi,[@@clkmode_]
 		call	@@entersymbol
 
-		mov	al,type_con		;enter CLKFREQ_ symbol
+		mov	al,type_con_int		;enter CLKFREQ_ symbol
 		mov	ebx,[clkfreq]
 		lea	esi,[@@clkfreq_]
 		jmp	@@entersymbol
@@ -6454,7 +7059,7 @@ determine_clock:
 		call	find_symbol
 		cmp	al,type_undefined
 		je	@@findsymbol2
-		cmp	al,type_con
+		cmp	al,type_con_int
 		jne	error_cfcobd
 		stc
 @@findsymbol2:	rcl	[@@flags],1
@@ -6811,7 +7416,7 @@ distill_objects:
 
 		pop	eax
 		sub	eax,[obj_ptr]
-		mov	[distilled_bytes],eax
+		add	[distilled_bytes],eax
 
 		ret
 ;
@@ -6904,7 +7509,7 @@ distill_scrub:	mov	ebx,0			;start with base object
 		jecxz	@@none			;if no sub-objects, no offsets to clear
 
 		mov	eax,0			;clear sub-object offset(s)
-@@zero:		mov	[dword obj+esi+eax*8],0	
+@@zero:		mov	[dword obj+esi+eax*8],0
 		inc	eax
 		loop	@@zero
 
@@ -7254,7 +7859,7 @@ get_element:	push	ecx
 		je	@@str3
 		inc	[source_flags]		;not '"', set comma flag
 		dec	esi
-@@str3:		mov	al,type_con		;return constant
+@@str3:		mov	al,type_con_int		;return constant
 		jmp	@@got
 @@str4:		inc	[source_flags]		;cancel comma flag
 		dec	esi
@@ -7392,7 +7997,7 @@ get_element:	push	ecx
 @@con7:		dec	esi			;integer done, back up to last chr
 		cmp	ch,0			;trap overflow
 		jne	@@error_con
-@@con8:		mov	eax,type_con		;return constant
+@@con8:		mov	eax,type_con_int	;return constant
 		jmp	@@got
 
 @@packed:	call	@@packedchr		;packed chrs
@@ -7949,6 +8554,7 @@ try_spin2_con_exp:
 		xor	ecx,ecx			;reset math stack pointer
 
 		mov	dh,4			;set Spin2 constant expression mode
+		mov	[exp_flags],0		;must resolve
 
 		push	[source_ptr]		;push source_ptr
 
@@ -7994,14 +8600,10 @@ resolve_exp:	mov	dl,ternary_precedence+1	;expression, set ternary precedence + 1
 		call	check_binary		;if not binary, back up
 		jne	@@backup
 
-		call	@@previewop		;binary, preview for indication/compliance
-		cmp	bh,dl			;if not current precedence, back up
+		cmp	bh,dl			;binary, if not current precedence, back up
 		jne	@@backup
-		push	[source_start]
-		push	[source_finish]
-		call	@@subexp		;resolve next sub-expression
-		pop	[source_finish]
-		pop	[source_start]
+		call	@@previewop		;preview for indication/compliance
+		call	@@subexpsave		;resolve sub-expression, save source pointers
 		call	perform_binary		;perform binary operation
 		jmp	@@next			;check for next binary
 
@@ -8019,9 +8621,9 @@ resolve_exp:	mov	dl,ternary_precedence+1	;expression, set ternary precedence + 1
 		jmp	@@done
 
 @@term:		call	get_element		;term, get constant, unary, or '('
-		call	check_plus		;ignore leading '+' or '+.'
+		call	is_plus			;ignore leading '+' or '+.'
 		je	@@term
-		call	check_constant
+		call	get_constant
 		je	@@constant
 		call	sub_to_neg
 		call	fsub_to_fneg
@@ -8036,13 +8638,9 @@ resolve_exp:	mov	dl,ternary_precedence+1	;expression, set ternary precedence + 1
 @@constant:	call	perform_push		;constant, push onto math stack
 		jmp	@@done
 
-@@unary:	call	@@previewop		;unary, preview for indication/compliance
-		mov	dl,bh			;set unary's precedence
-		push	[source_start]
-		push	[source_finish]
-		call	@@subexp		;resolve sub-expression
-		pop	[source_finish]
-		pop	[source_start]
+@@unary:	mov	dl,bh			;unary, set unary's precedence
+		call	@@previewop		;preview for indication/compliance
+		call	@@subexpsave		;resolve sub-expression, save source pointers
 		call	perform_unary		;perform unary operation
 		jmp	@@done
 
@@ -8059,30 +8657,33 @@ resolve_exp:	mov	dl,ternary_precedence+1	;expression, set ternary precedence + 1
 		ret
 
 
-@@previewop:	cmp	dh,4			;if trying to resolve Spin2 constant, exit
-		je	@@exit
-
-		call	check_float		;if operator is floating-point-compatible, exit
-		je	@@exit
-
+@@previewop:	cmp	dh,4			;if trying to resolve Spin2 constant, okay
+		je	@@okay
+		call	check_float		;if operator is floating-point-compatible, okay
+		je	@@okay
 		cmp	dh,2			;if float mode, error
 		je	error_ionaifpe
+		mov	dh,1			;set integer mode in case undefined
+@@okay:		ret
 
-		mov	dh,1			;set integer mode
-
-@@exit:		ret
+@@subexpsave:	push	[source_start]		;save source pointers
+		push	[source_finish]
+		call	@@subexp		;resolve next sub-expression
+		pop	[source_finish]
+		pop	[source_start]
+		ret
 ;
 ;
-; Check constant
+; Get constant
 ; z=1 if constant with value in ebx
 ;
-check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
+get_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		jne	@@notspin2
 
 		call	sub_to_neg		;-constant?
 		jne	@@spin2notneg
 		call	get_element
-		cmp	al,type_con		;-type_con?
+		cmp	al,type_con_int		;-type_con_int?
 		jne	@@spin2notconi
 		neg	ebx
 		jmp	@@spin2con
@@ -8090,11 +8691,11 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		jne	@@spin2notconf
 		xor	ebx,80000000h
 		jmp	@@spin2con
-@@spin2notconf:	call	back_element		;back up past non-constant		
+@@spin2notconf:	call	back_element		;back up past non-constant
 		call	back_element		;back up to '-'
 		call	get_element		;get '-' again
 @@spin2notneg:
-		cmp	al,type_con		;type_con okay
+		cmp	al,type_con_int		;type_con_int okay
 		je	@@spin2exit
 		cmp	al,type_con_float	;type_con_float okay
 		je	@@spin2exit
@@ -8102,11 +8703,13 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		cmp	al,type_pound		;check for #register
 		jne	@@spin2notreg
 		call	get_element
-		cmp	al,type_dat_byte	;must be type_dat_byte..type_dat_long_res
+		cmp	al,type_dat_long_res	;must be type_dat_long_res
+		je	@@gotres
+		cmp	al,type_dat_byte	;..or type_dat_byte..type_dat_long
 		jb	@@spin2regerr
-		cmp	al,type_dat_long_res
+		cmp	al,type_dat_long
 		ja	@@spin2regerr
-		shr	ebx,32-12		;must be below $400
+@@gotres:	shr	ebx,32-12		;must be below $400
 		cmp	ebx,400h
 		jb	@@spin2con
 @@spin2regerr:	jmp	error_eregsym
@@ -8118,14 +8721,14 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		mov	eax,ebx			;get obj symbol
 		call	get_obj_symbol
 		jz	fail_spin2_con_exp	;if obj.method, not obj.constant
-@@spin2con:	cmp	al,al			;type_con/type_con_float, make z=1
+@@spin2con:	cmp	al,al			;type_con_int/type_con_float, make z=1
 @@spin2exit:	ret
 @@notspin2:
 
 		call	sub_to_neg		;-constant?
 		jne	@@notneg
 		call	get_element
-		cmp	al,type_con		;-type_con?
+		cmp	al,type_con_int		;-type_con_int?
 		jne	@@notconi
 		neg	ebx
 		jmp	@@chkconi
@@ -8133,11 +8736,11 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		jne	@@notconf
 		xor	ebx,80000000h
 		jmp	@@chkconf
-@@notconf:	call	back_element		;back up past non-constant		
+@@notconf:	call	back_element		;back up past non-constant
 		call	back_element		;back up to '-'
 		call	get_element		;get '-' again
 @@notneg:
-		cmp	al,type_con		;constant integer?
+		cmp	al,type_con_int		;constant integer?
 		jne	@@notcon
 @@chkconi:	call	@@checkint
 		jmp	@@okay
@@ -8213,14 +8816,25 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		call	@@checkint
 		jmp	@@okay
 @@notreg:
-		cmp	[inline_flag],1		;if inline mode, remap local longs
+		cmp	[inline_flag],1		;if inline-assembly mode, remap local longs
 		jne	@@notinline
 		cmp	al,type_loc_byte	;local byte variable not allowed
 		je	@@locerror
 		cmp	al,type_loc_word	;local word variable not allowed
 		je	@@locerror
 		cmp	al,type_loc_long	;local long variable is allowed
+		je	@@locsizeok
+		cmp	al,type_loc_struct	;local struct variable is allowed, but user must know layout
+		je	@@locsizeok
+		cmp	al,type_loc_byte_ptr	;local byte ptr variable is allowed
+		je	@@locsizeok
+		cmp	al,type_loc_word_ptr	;local word ptr variable is allowed
+		je	@@locsizeok
+		cmp	al,type_loc_long_ptr	;local long ptr variable is allowed
+		je	@@locsizeok
+		cmp	al,type_loc_struct_ptr	;local struct ptr variable is allowed, but user must know layout
 		jne	@@notinline
+@@locsizeok:	and	ebx,0FFFFFh		;trim in case structure
 		test	bl,11b			;must be long-aligned
 		jnz	@@locerror
 		cmp	ebx,10h shl 2		;must be within first 16
@@ -8236,7 +8850,7 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		mov	eax,ebx			;get obj symbol
 		call	get_obj_symbol
 		je	error_eacn		;if method, error
-		jmp	check_constant		;type_con/type_con_float, determine which one
+		jmp	get_constant		;type_con_int/type_con_float, determine which one
 @@notobjcon:
 		cmp	al,type_at		;check for @type_dat_????
 		jne	@@notat
@@ -8277,12 +8891,12 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		jne	@@notres
 		mov	al,type_dat_long
 @@notres:	cmp	al,type_dat_byte	;check for type_dat_????
-		jc	@@ret			;z=1 if true
+		jb	@@ret			;z=1 if true
 		cmp	al,type_dat_long
 		jbe	@@okay
 		ret
 
-@@checkundef:	cmp	al,type_undefined	;check for undefined
+@@checkundef:	cmp	al,type_undefined	;check for either undefined or undefined.symbol
 		jne	@@ret			;if not undefined, z=0
 		or	[exp_flags],100b	;set undefined flag
 		push	[source_start]		;save symbol pointers
@@ -8673,38 +9287,50 @@ ddx		@@t
 		ret
 
 
-@@flt:		cmp	al,al			;flt (z=1)
 @@lt:		mov	dl,001b			;lt
 		jmp	@@cmp
+
+@@flt:		cmp	dl,001			;flt
+		jmp	@@fcmp
 
 @@ltu:		mov	dl,001b			;ltu
 		jmp	@@cmpu
 
-@@flte:		cmp	al,al			;flte (z=1)
 @@lte:		mov	dl,101b			;lte
 		jmp	@@cmp
+
+@@flte:		mov	dl,101b			;flte
+		jmp	@@fcmp
 
 @@lteu:		mov	dl,101b			;lteu
 		jmp	@@cmpu
 
-@@fe:		cmp	al,al			;fe (z=1)
 @@e:		mov	dl,100b			;e
 		jmp	@@cmp
 
-@@fne:		cmp	al,al			;fne (z=1)
+@@fe:		mov	dl,100b			;fe
+		jmp	@@fcmp
+
 @@ne:		mov	dl,011b			;ne
 		jmp	@@cmp
 
-@@fgte:		cmp	al,al			;fgte (z=1)
+@@fne:		mov	dl,011b			;fne
+		jmp	@@fcmp
+
 @@gte:		mov	dl,110b			;gte
 		jmp	@@cmp
+
+@@fgte:		mov	dl,110b			;fgte
+		jmp	@@fcmp
 
 @@gteu:		mov	dl,110b			;gteu
 		jmp	@@cmpu
 
-@@fgt:		cmp	al,al			;fgt (z=1)
 @@gt:		mov	dl,010b			;gt
 		jmp	@@cmp
+
+@@fgt:		mov	dl,010b			;fgt
+		jmp	@@fcmp
 
 @@gtu:		mov	dl,010b			;gtu
 		jmp	@@cmpu
@@ -8720,6 +9346,7 @@ ddx		@@t
 @@ltegt2:	ret
 
 @@ltegtfp:	call	@@cmp			;ltegt float
+		and	eax,3F800000h
 		test	dl,001b
 		jz	@@ltegtfp2
 		xor	eax,80000000h		;less than, make -1.0
@@ -8735,9 +9362,17 @@ ddx		@@t
 		jmp	@@cmp3
 
 
-@@cmp:		jz	@@fcmp			;cmp, float?
+@@cmp:		jnz	@@cmp1			;cmp, float?
+		call	@@fcmp
+		and	eax,3F800000h
+		ret
 
-		cmp	eax,ecx			;cmp integer
+@@fcmp:		mov	ebx,ecx			;cmp float
+		call	fp_cmp
+		jc	error_fpo
+		jmp	@@cmp2
+
+@@cmp1:		cmp	eax,ecx			;cmp integer
 @@cmp2:		mov	al,001b			;less than
 		jl	@@cmp3
 		mov	al,010b			;greater than
@@ -8747,16 +9382,10 @@ ddx		@@t
 		movzx	eax,dl
 		jmp	@@log
 
-@@fcmp:		mov	ebx,ecx			;cmp float
-		call	fp_cmp
-		jc	error_fpo
-		jmp	@@cmp2
 
-
-@@lognot:	cmp	eax,1			;lognot - make 0 into -1/1.0 and non-0 into 0
-		mov	eax,0
-		rcl	eax,1
-		jmp	@@log
+@@lognot:	call	@@log			;lognot
+		not	eax
+		ret
 
 
 @@logand:	call	@@log			;logand
@@ -8773,17 +9402,11 @@ ddx		@@t
 
 
 @@log:		or	eax,eax			;make eax and ecx logical
-		jz	@@log2			;(0 stays 0)
-		mov	eax,0FFFFFFFFh		;(non-0 becomes -1 for integer)
-		cmp	dh,2
-		jne	@@log2
-		mov	eax,3F800000h		;(non-0 becomes 1.0 for floating-point)
+		jz	@@log2			;non-0 becomes $FFFFFFFF (-1)
+		mov	eax,0FFFFFFFFh
 @@log2:		or	ecx,ecx
 		jz	@@log3
 		mov	ecx,0FFFFFFFFh
-		cmp	dh,2
-		jne	@@log3
-		mov	ecx,3F800000h
 @@log3:		ret
 ;
 ;
@@ -9548,7 +10171,7 @@ cb_loop:	call	get_element		;get element
 		cmp	al,type_repeat		;'repeat' block?
 		je	cb_repeat
 
-		call	compile_inst		;no flow control structures, compile instruction
+		call	compile_instruction	;no flow-control structures, compile instruction
 		call	get_end			;get end of line
 		jmp	cb_loop			;loop
 
@@ -9843,7 +10466,7 @@ cb_case_fast:	mov	ebp,[column]		;set new column
 		mov	eax,0			;enter spacer for rfword
 		call	enter_obj_word
 
-		mov	ebx,[obj_ptr]		;remember jump table start
+		mov	ebx,[obj_ptr]		;remember jump table start	TESTT could be write_bstack_ptr
 		mov	eax,@@table_ptr
 		call	write_bstack
 
@@ -9927,7 +10550,7 @@ cb_case_fast:	mov	ebp,[column]		;set new column
 
 		mov	edx,ecx			;get 'other' case in dx
 
-		mov	ecx,0			;init jump table with 'other' case
+		mov	ecx,0			;init jump table with 'other' case	TESTT use enter_obj_word, instead, to avoid obj overflow
 @@inittable:	mov	[word obj+eax+ecx*2],dx
 		inc	ecx
 		cmp	ecx,ebx
@@ -10420,7 +11043,8 @@ ddx		bstack,block_stack_limit
 ;
 ; Compile instruction
 ;
-compile_inst:
+compile_instruction:
+
 		mov	ch,0			;(no result required, since 'abort' provides result)
 		mov	cl,bc_drop_trap		;(drop anchor - trap)
 		cmp	al,type_back		;\obj{[]}.method({param,...}), \method({param,...}), \var({param,...}){:results} ?
@@ -10446,7 +11070,7 @@ compile_inst:
 		mov	cl,bc_coginit
 		je	ct_cogspin
 
-		cmp	al,type_debug		;DEBUG()?
+		cmp	al,type_debug		;DEBUG?
 		je	ci_debug
 
 		cmp	al,type_i_flex		;flex instruction?
@@ -10479,17 +11103,46 @@ compile_inst:
 
 		mov	edx,[source_start]	;save source start for compile_var_multi and ct_method_ptr
 
-		cmp	al,type_under		;_,... := param(s),... ?
-		jne	@@notunder
+		cmp	al,type_under		;check for _{(type_con_int|type_con_struct)},... := param(s),...
+		jne	@@notwriteskip
+		call	back_element
+		call	check_write_skip
 		call	get_comma
 		jmp	compile_var_multi
-@@notunder:
-		call	check_variable		;variable ?
+@@notwriteskip:
+		call	check_var		;variable ?
 		jne	error_eaiov		;if not, error
 
 		call	get_element		;get element after variable
 
 		cmp	al,type_comma		;var,... := param(s),... ?
+		je	compile_var_multi
+
+		push	eax			;check for structure operation
+		mov	al,ch
+		call	is_struct
+		pop	eax
+		jne	@@notstruct
+		cmp	[compiled_struct_flags],3
+		je	@@notstruct
+		cmp	al,type_assign		;structure := ?
+		jne	@@notstructass
+		cmp	[compiled_struct_size],15*4
+		jbe	compile_var_multi	;if 15 longs or less, do stack assignment
+		mov	ah,bc_bytemove		;else, do copy
+		jmp	compile_struct_copy
+@@notstructass:	cmp	al,type_swap		;structure :=: ?
+		mov	ah,bc_byteswap
+		je	compile_struct_copy
+		cmp	al,type_til		;structure~ ?
+		mov	ah,bc_con_n+1		;(0)
+		je	compile_struct_fill
+		cmp	al,type_tiltil		;structure~~ ?
+		mov	ah,bc_con_n+0		;(-1)
+		je	compile_struct_fill
+		jmp	error_eastott
+@@notstruct:
+		cmp	al,type_assign		;var := ?
 		je	compile_var_multi
 
 		cmp	al,type_left		;var({param,...}){:results} ?
@@ -10522,10 +11175,6 @@ compile_inst:
 		mov	dl,bc_con_n
 		je	compile_var_clrset_inst
 
-		cmp	al,type_assign		;var := ?
-		mov	dl,1
-		je	@@assign
-
 		call	check_binary		;var binary op assign (w/push)?
 		jne	@@notbin
 		call	check_equal		;check for '=' after binary op
@@ -10536,7 +11185,7 @@ compile_inst:
 		sub	bl,bc_lognot-bc_lognot_write
 		mov	dh,bl
 		mov	dl,2
-@@assign:	call	compile_exp
+		call	compile_exp
 		jmp	compile_var
 @@notbin:
 		call	back_element		;no post-var modifier, back up
@@ -10544,6 +11193,50 @@ compile_inst:
 		call	back_element		;error, back up to variable
 		call	get_element
 		jmp	error_vnao
+;
+;
+; Compile 'struct1 := struct2' or 'struct1 :=: struct2'
+;
+compile_struct_copy:
+
+		push	eax			;got struct1
+		push	[compiled_struct_size]
+
+		call	compile_var_addr	;compile @struct1
+
+		call	get_struct_variable	;get struct2
+
+		pop	eax			;make sure structs are same size
+		cmp	[compiled_struct_size],eax
+		jne	error_smbss
+		push	eax
+
+		call	compile_var_addr	;compile @struct2
+
+		pop	ebx			;compile common struct size
+		call	compile_constant
+
+		pop	eax			;enter hub bytecode bc_bytemove or bc_byteswap
+		mov	al,ah
+		jmp	enter_hub_bytecode
+;
+;
+; Compile struct~ or struct~~
+;
+compile_struct_fill:
+
+		push	[compiled_struct_size]	;got struct
+
+		call	compile_var_addr	;compile @struct
+
+		mov	al,ah			;enter bc_con_n for 0 or -1
+		call	enter_obj
+
+		pop	ebx			;compile struct size
+		call	compile_constant
+
+		mov	al,bc_bytefill		;enter hub bytecode bc_bytefill
+		jmp	enter_hub_bytecode
 ;
 ;
 ; Compile instruction - 'next'/'quit'
@@ -10664,28 +11357,27 @@ ci_send:	call	get_left		;get '('
 		call	check_right		;make sure '(' not followed by ')'
 		je	error_esendd
 
-@@trynext:	mov	ecx,-1			;check for string of bytes
+@@trynext:	mov	ecx,0			;check for string of bytes
 		mov	edx,[source_ptr]	;remember source pointer
 
-@@trybytes:	inc	ecx			;constant byte?
-		call	get_element
-		cmp	al,type_con
+@@trybytes:	call	get_element		;constant byte?
+		cmp	al,type_con_int
 		jne	@@notbyte
 		cmp	ebx,0FFh
 		ja	@@notbyte
+		inc	ecx
 		call	check_comma
 		je	@@trybytes
-		call	check_right
-		jne	@@notbyte
-		inc	ecx
 
-@@notbyte:	cmp	ecx,2			;if two or more bytes, compile for bc_call_send_bytes
+@@notbyte:	mov	[source_ptr],edx	;set source pointer
+
+		cmp	ecx,2			;if two or more bytes, compile for bc_call_send_bytes
 		jb	@@tryother
+
 		mov	al,bc_call_send_bytes
 		call	enter_obj
 		mov	eax,ecx
 		call	compile_rfvar
-		mov	[source_ptr],edx
 @@enterbytes:	call	get_element
 		mov	al,bl
 		call	enter_obj
@@ -10695,8 +11387,7 @@ ci_send:	call	get_left		;get '('
 @@nocomma:	loop	@@enterbytes
 		jmp	@@checkmore
 
-@@tryother:	mov	[source_ptr],edx	;compile SEND parameter
-		call	compile_parameter_send
+@@tryother:	call	compile_parameter_send	;compile SEND parameter
 		cmp	eax,0			;if SEND parameter returned no value, check for more parameters
 		je	@@checkmore
 		mov	al,bc_call_send		;value on stack, compile bc_call_send
@@ -10716,13 +11407,13 @@ compile_inline:	mov	ecx,000h		;ready default cog origin
 		je	@@org
 		call	get_value_int		;get cog origin value
 		cmp	ebx,inline_limit
-		jae	error_iolmbbx
+		ja	error_icaexl
 		mov	ecx,ebx
 		call	check_comma		;check for comma
 		jne	@@orgend
 		call	get_value_int		;get cog origin limit value
 		cmp	ebx,inline_limit
-		jae	error_iolmbbx
+		ja	error_icaexl
 		mov	edx,ebx
 @@orgend:	call	get_end			;get_end
 @@org:
@@ -10768,35 +11459,62 @@ compile_inline:	mov	ecx,000h		;ready default cog origin
 		ret
 ;
 ;
-; Compile multi-variable assignment - var,... := param(s),...
+; Compile multi-variable assignment - var / _{(type_con_int|type_con_struct)},... := param(s),...
 ;
 compile_var_multi:
 
 		mov	[source_ptr],edx	;repoint to initial variable
 
-		mov	edx,0			;scan '_/var,...' and remember source_ptr's
-@@scan:		push	[source_ptr]
-		call	check_under		;underscore?
-		je	@@under
-		call	get_variable		;if not underscore, get variable
-@@under:	inc	edx			;track variable count
+		mov	ecx,0			;scan 'var / _{(type_con_int|type_con_struct)},...' and remember source_ptr's
+		mov	edx,0			;ecx = long count, edx = variable count
+
+@@scan:		push	[source_ptr]		;save source pointer
+
+		call	check_write_skip	;if '_{(type_con_int|type_con_struct)}', got long count in eax
+		je	@@next
+
+		push	ecx			;not '_{(type_con_int|type_con_struct)}', get variable
+		call	get_variable
+		mov	al,ch
+		pop	ecx
+		call	is_struct		;if not structure, single long
+		mov	eax,1
+		jne	@@next
+		cmp	[compiled_struct_flags],3	;if structure byte/word/long, single long
+		je	@@next
+		mov	eax,[compiled_struct_size]	;structure, must fit within 15 longs
+		call	check_struct_stack_fit
+		add	eax,11b			;convert bytes to enveloping longs
+		shr	eax,2
+@@next:		add	ecx,eax			;track long count
+		inc	edx			;track variable count
 		call	check_comma
 		je	@@scan
 
+
 		call	get_assign		;get ":='
 
-		mov	ecx,edx			;compile parameters
-		call	compile_parameters_np
+		call	compile_parameters_np	;compile parameters (long count in ecx)
 
-		mov	ecx,edx			;get variable count		
+
+		mov	ecx,edx			;get variable count
 		mov	edx,[source_ptr]	;remember source_ptr
 
 @@write:	pop	[source_ptr]		;compile variable writes
 		push	ecx
 		push	edx
-		call	check_under		;if underscore, just pop value
+		call	check_write_skip	;if '_{(type_con_int|type_con_struct)}', just pop value(s)
 		jne	@@var
-		mov	al,bc_pop
+		cmp	eax,1			;single or multiple pop(s)?
+		je	@@singlepop
+		push	eax			;multiple pops
+		mov	al,bc_pop_rfvar
+		call	enter_obj
+		pop	eax
+		shl	eax,2
+		call	compile_rfvar
+		jmp	@@cont
+@@singlepop:	mov	al,bc_pop		;single pop
 		call	enter_obj
 		jmp	@@cont
 @@var:		call	compile_var_write	;else, write value to variable
@@ -10806,6 +11524,50 @@ compile_var_multi:
 
 		mov	[source_ptr],edx	;restore source_ptr
 		ret
+;
+;
+; Check al for '_' or '_(type_con_int|type_con_struct)'
+; on entry, al=type, ebx=value
+; on exit, z=1 if '_' or '_(type_con_int|type_con_struct)' with enveloping long count in eax
+;
+check_write_skip:
+
+		call	check_under		;if not '_', exit with z=0
+		jne	@@not
+
+		call	check_left		;got '_', check for '('
+		mov	eax,1
+		jne	@@got			;if just '_', single long
+
+		call	get_element		;got '_(', check for integer constant
+		cmp	al,type_con_int
+		jne	@@notint
+		mov	eax,ebx
+		cmp	eax,1
+		jb	@@interr
+		cmp	eax,15
+		jbe	@@gotint
+@@interr:	jmp	error_cmbf1t15
+@@notint:
+		call	back_element		;check for struct
+		push	ecx
+		push	edx
+		push	esi
+		push	edi
+		call	get_struct_and_size
+		call	check_struct_stack_fit
+		pop	edi
+		pop	esi
+		pop	edx
+		pop	ecx
+		add	eax,11b			;get enveloping long count
+		shr	eax,2
+
+@@gotint:	call	get_right		;get ')'
+
+@@got:		cmp	al,al			;z=1
+
+@@not:		ret
 ;
 ;
 ; Compile instruction - unary var assignment
@@ -10836,13 +11598,15 @@ ci_unary:	call	check_assign		;verify that assignment is allowed
 ; 00000111	DLY(ms)				delay for ms
 ; 00001000	PC_KEY(ptr)			get key
 ; 00001001	PC_MOUSE(ptr)			get mouse
+; 00001010	C_Z_pre				ouput ", C=? Z=?"
+; 00001011	C_Z				ouput "C=? Z=?"
 ;
-; ______00	', ' + zstr + ' = ' + data	specifiers for ZSTR..SBIN_LONG_ARRAY
-; ______01	       zstr + ' = ' + data
-; ______10	               ', ' + data
-; ______11	                      data
+; ______00	', ' + zstring + ' = ' + data	specifiers for BOOL..SBIN_LONG_ARRAY
+; ______01	       zstring + ' = ' + data
+; ______10	                  ', ' + data
+; ______11	                         data
 ;
-; 001000__	<empty>
+; 001000__	BOOL(val)			boolean
 ; 001001__	ZSTR(ptr)			z-string, in quotes for show
 ; 001010__	<empty>
 ; 001011__	FDEC(val)			floating-point
@@ -10916,6 +11680,44 @@ count		dc_str
 count		dc_dly
 count		dc_pc_key
 count		dc_pc_mouse
+count		dc_c_z_pre
+count		dc_c_z
+;
+;
+; Check if DEBUG is enabled and okay to proceed
+; z=1 if okay, z=0 if not okay
+;
+check_debug:	push	ebx
+		push	ecx
+
+		cmp	[debug_mode],0		;debug mode?
+		je	@@disabled
+
+		cmp	[debug_disable],0	;debug disabled?
+		jne	@@disabled
+
+		call	check_leftb		;check for [gatebit]
+		jne	@@enabled
+		call	get_value_int		;gatebit must be 0..31
+		cmp	ebx,31
+		ja	error_dmbmb
+		cmp	[debug_mask_defined],0	;DEBUG_MASK must be defined
+		je	error_dmmbd
+		call	get_rightb
+		mov	cl,bl			;check if gatebit set in mask
+		mov	eax,1
+		shl	eax,cl
+		test	[debug_mask],eax
+		jnz	@@enabled		;if gatebit set, enabled
+
+@@disabled:	or	al,1			;disabled, z=0
+		jmp	@@done
+
+@@enabled:	xor	al,al			;enabed, z=1
+
+@@done:		pop	ecx
+		pop	ebx
+		ret
 ;
 ;
 ; Compile DEBUG for Spin2
@@ -10925,8 +11727,8 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		mov	[@@tickmode],0		;reset tick mode
 		mov	[@@stack],0		;reset run-time stack depth
 
-		cmp	[debug_mode],0		;if debug disabled, scan to end of line
-		je	scan_to_end
+		call	check_debug		;if debug disabled, scan to end of line
+		jne	scan_to_end
 
 		call	check_left		;debug enabled, check for '('
 		je	@@left
@@ -10961,6 +11763,12 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		je	@@isif
 		cmp	al,type_ifnot
 		je	@@isifnot
+		cmp	al,type_op
+		jne	@@notbool
+		cmp	bl,op_ternary
+		je	@@tickbool
+@@notbool:	cmp	al,type_dot
+		je	@@tickfdec
 		cmp	al,type_left
 		je	@@tickdec
 		cmp	al,type_dollar
@@ -10969,7 +11777,13 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		je	@@tickbin
 		cmp	al,type_pound
 		je	@@tickchr
-		jmp	error_eldppodc
+		jmp	error_ebackcmd
+
+@@tickbool:	mov	bl,00100011b		;'?', do BOOL_
+		jmp	@@tickcmd
+
+@@tickfdec:	mov	bl,00101111b		;'.', do FDEC_
+		jmp	@@tickcmd
 
 @@tickdec:	dec	[source_ptr]		;'(', back up and do SDEC_
 		mov	bl,01100011b
@@ -11052,6 +11866,13 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		call	get_right		;get ')' to ensure last command
 		jmp	@@enterdebug		;enter DEBUG code and record
 @@notdkm:
+		cmp	bl,dc_c_z_pre		;C_Z command?
+		jne	@@notcz
+		add	bl,[debug_first]	;if first flag set, skip ', ' output
+		call	debug_enter_byte	;enter C_Z command
+		mov	[debug_first],0		;clear first flag
+		jmp	@@checknext		;check for more DEBUG data/commands
+@@notcz:
 		test	bl,10h			;dual-parameter command?
 		jnz	@@dualparam
 
@@ -11197,6 +12018,12 @@ ci_debug_asm:	mov	[debug_first],1		;set first flag
 		je	@@isif
 		cmp	al,type_ifnot
 		je	@@isifnot
+		cmp	al,type_op
+		jne	@@notbool
+		cmp	bl,op_ternary
+		je	@@tickbool
+@@notbool:	cmp	al,type_dot
+		je	@@tickfdec
 		cmp	al,type_left
 		je	@@tickdec
 		cmp	al,type_dollar
@@ -11205,7 +12032,13 @@ ci_debug_asm:	mov	[debug_first],1		;set first flag
 		je	@@tickbin
 		cmp	al,type_pound
 		je	@@tickchr
-		jmp	error_eldppodc
+		jmp	error_ebackcmd
+
+@@tickbool:	mov	bl,00100011b		;'?', do BOOL_
+		jmp	@@tickcmd
+
+@@tickfdec:	mov	bl,00101111b		;'.', do FDEC_
+		jmp	@@tickcmd
 
 @@tickdec:	dec	[source_ptr]		;'(', back up and do SDEC_
 		mov	bl,01100011b
@@ -11287,7 +12120,14 @@ ci_debug_asm:	mov	[debug_first],1		;set first flag
 		call	get_right		;get ')' to ensure last command
 		jmp	@@enterdebug		;enter DEBUG code and record
 @@notdkm:
-		call	get_left		;ZSTR..SBIN_LONG_ARRAY, get '('
+		cmp	bl,dc_c_z_pre		;C_Z command?
+		jne	@@notcz
+		add	bl,[debug_first]	;if first flag set, skip ', ' output
+		call	debug_enter_byte	;enter C_Z command
+		mov	[debug_first],0		;clear first flag
+		jmp	@@checknext		;check for more DEBUG data/commands
+@@notcz:
+		call	get_left		;BOOL..SBIN_LONG_ARRAY, get '('
 
 @@param:	call	debug_enter_byte_flag	;enter command with flag
 
@@ -11450,9 +12290,9 @@ debug_check_string:
 
 		mov	ecx,0
 		mov	edx,[source_ptr]
-		
+
 @@trybyte:	call	get_element		;constant chr?
-		cmp	al,type_con
+		cmp	al,type_con_int
 		jne	@@notchr
 		or	ebx,ebx
 		je	@@notchr
@@ -11644,25 +12484,28 @@ dbx		debug_record,100h
 ;
 ;
 ; Compile expression with sub-expressions and check for constant
-; z=1 if constant with value in exp_con_value and expression skipped
+; z=1 if constant with value in con_value and expression skipped
 ;
 compile_exp_check_con:
+
+		push	[obj_ptr]		;save obj_ptr
+		pop	[@@con_ptr]
 
 		call	compile_exp		;compile expression, may be constant
 		jnz	@@nope
 
-		push	[con_ptr]		;constant, restore obj_ptr, z=1
+		push	[@@con_ptr]		;constant, restore obj_ptr, z=1
 		pop	[obj_ptr]
 @@nope:
 		ret
 
 
-ddx		con_ptr
+ddx		@@con_ptr
 ddx		con_value
 ;
 ;
 ; Compile expression with sub-expressions
-; z=1 if constant with obj ptr in con_ptr and value in con_value
+; z=1 if constant with value in con_value
 ;
 compile_exp:	push	eax
 		push	ebx
@@ -11674,9 +12517,7 @@ compile_exp:	push	eax
 		call	try_spin2_con_exp	;first, try to resolve constant expression
 		jc	@@notcon		;if failed, compile non-constant expression
 
-		push	[obj_ptr]		;constant, update con_ptr and con_value
-		pop	[con_ptr]
-		mov	[con_value],ebx
+		mov	[con_value],ebx		;constant, update con_value
 		call	compile_constant	;compile constant
 		xor	al,al			;z=1
 		jmp	@@exit
@@ -11724,7 +12565,7 @@ compile_exp:	push	eax
 		jmp	@@done
 
 @@term:		call	get_element		;term, get '@@', unary, '(', or term
-		call	check_plus		;ignore leading '+' or '+.'
+		call	is_plus			;ignore leading '+' or '+.'
 		je	@@term
 		call	negcon_to_con		;convert -constant to constant
 		call	sub_to_neg		;convert subtract to negate
@@ -11783,35 +12624,38 @@ compile_exp:	push	eax
 ;
 ; Compile term
 ;
-compile_term:	cmp	al,type_con		;constant integer?
+compile_term:	cmp	al,type_con_int		;constant integer?
 		je	compile_constant
 
 		cmp	al,type_con_float	;constant float?
 		je	compile_constant
 
-		cmp	al,type_constr		;STRING?
+		cmp	al,type_sizeof		;SIZEOF ?
+		je	ct_sizeof
+
+		cmp	al,type_constr		;STRING ?
 		je	ct_constr
 
-		cmp	al,type_conlstr		;LSTRING?
+		cmp	al,type_conlstr		;LSTRING ?
 		je	ct_conlstr
 
-		cmp	al,type_size		;BYTE/WORD/LONG?
+		cmp	al,type_size		;BYTE/WORD/LONG ?
 		jne	@@notsize
 		call	check_left
 		jne	@@notsize
 		jmp	ct_condata
 @@notsize:
-		cmp	al,type_float		;FLOAT?
+		cmp	al,type_float		;FLOAT ?
 		jne	@@notfloat
 		mov	ebx,fc_float
 		jmp	compile_flex
 @@notfloat:
-		cmp	al,type_round		;ROUND?
+		cmp	al,type_round		;ROUND ?
 		jne	@@notround
 		mov	ebx,fc_round
 		jmp	compile_flex
 @@notround:
-		cmp	al,type_trunc		;TRUNC?
+		cmp	al,type_trunc		;TRUNC ?
 		jne	@@nottrunc
 		mov	ebx,fc_trunc
 		jmp	compile_flex
@@ -11866,9 +12710,25 @@ compile_term:	cmp	al,type_con		;constant integer?
 
 		mov	edx,[source_start]	;save source start for ct_method_ptr
 
-		call	check_variable		;var ?
+		call	check_var		;var ?
 		jne	error_eaet
 
+		mov	al,ch				;struct var ?
+		call	is_struct
+		jne	@@notstruct
+		cmp	[compiled_struct_flags],3	;if byte/word/long member, treat as regular variable
+		je	@@notstruct
+		cmp	[compiled_struct_size],4	;structure, if it fits in a long, read it
+		jbe	@@readvar
+		call	get_element			;doesn't fit in a long, only "==" or "<>" allowed
+		cmp	al,type_op
+		jne	@@structerr
+		cmp	bl,op_e
+		je	compile_struct_compare
+		cmp	bl,op_ne
+		je	compile_struct_compare
+@@structerr:	jmp	error_eeone
+@@notstruct:
 		call	get_element		;get element after variable
 
 		cmp	al,type_left		;var({param,...}){:results} ?
@@ -11924,8 +12784,54 @@ compile_term:	cmp	al,type_con		;constant integer?
 @@notbin:
 		call	back_element		;no post-var modifier, back up
 
-		mov	dl,0			;var, read
+@@readvar:	mov	dl,0			;var, read
 		jmp	compile_var
+;
+;
+; Compile 'struct1 == struct2' or 'struct1 <> struct2'
+; on entry, bl=op_e or bl=op_ne
+;
+compile_struct_compare:
+
+		push	ebx			;got struct1
+		push	[compiled_struct_size]
+
+		call	compile_var_addr	;compile @struct1
+
+		call	get_struct_variable	;get struct2
+
+		pop	eax			;make sure structs are same size
+		cmp	[compiled_struct_size],eax
+		jne	error_smbss
+		push	eax
+
+		call	compile_var_addr	;compile @struct2
+
+		pop	ebx			;compile common struct size
+		call	compile_constant
+
+		mov	al,bc_bytecomp		;enter hub bytecode bc_bytecomp
+		call	enter_hub_bytecode
+
+		pop	ebx			;if '<>', enter bc_lognot
+		cmp	bl,op_ne
+		jne	@@notne
+		mov	al,bc_lognot
+		call	enter_obj
+@@notne:
+		ret
+;
+;
+; Compile term - SIZEOF(type_???_struct)
+;
+ct_sizeof:	call	get_left			;get '('
+
+		call	get_struct_and_size		;get struct and size
+
+		mov	ebx,eax				;compile size constant
+		call	compile_constant
+
+		jmp	get_right			;get ')'
 ;
 ;
 ; Compile term - STRING("constantstring")
@@ -12053,7 +12959,7 @@ ct_try:		call	get_element		;get element after '\'
 		mov	edx,[source_start]	;save source start for ct_method_ptr
 
 		push	ecx			;\var({param,...}){:results} ?
-		call	check_variable
+		call	check_var
 		pop	ecx
 		jne	error_eamoov
 		call	get_left
@@ -12297,7 +13203,7 @@ ct_cogspin:	push	ecx			;push bc_coginit/bc_coginit_push
 		je	@@object
 		cmp	al,type_method		;method({param,...}) ?
 		je	@@method
-		call	check_variable		;var({param,...}) ?
+		call	check_var		;var({param,...}) ?
 		je	@@method_ptr
 		jmp	error_eamomp
 
@@ -12313,7 +13219,7 @@ ct_cogspin:	push	ecx			;push bc_coginit/bc_coginit_push
 		push	ecx			;push parameter count
 		call	compile_parameters	;compile parameters
 
-		push	[source_ptr]		;compile method pointer
+		push	[source_ptr]		;compile method as method pointer
 		mov	[source_ptr],edx
 		call	ct_at
 		pop	[source_ptr]
@@ -12358,7 +13264,7 @@ compile_flex:	call	get_left		;get '('
 		and	ecx,flex_params
 		jz	@@paramsdone
 
-		
+
 		test	bh,flex_pinfld		;check for pinfield in first parameter?
 		jz	@@params
 
@@ -12434,13 +13340,13 @@ compile_flex:	call	get_left		;get '('
 ; Compile term - @"string", @obj{[]}.method, @method, or @hubvar
 ;
 ct_at:		call	get_element		;get string, object, method, or variable
-		cmp	al,type_con
+		cmp	al,type_con_int
 		je	@@string
 		cmp	al,type_obj
 		je	@@object
 		cmp	al,type_method
 		je	@@method
-		call	check_variable
+		call	check_var
 		je	@@var
 		jmp	error_easvmoo
 
@@ -12456,7 +13362,7 @@ ct_at:		call	get_element		;get string, object, method, or variable
 		mov	cl,1			;reset length, account for 0 terminator
 		call	back_element		;back up to first character
 @@chr:		call	get_element		;get string chr
-		cmp	al,type_con
+		cmp	al,type_con_int
 		jne	@@chrerror
 		or	ebx,ebx			;0 not allowed
 		jz	@@chrerror
@@ -12532,7 +13438,7 @@ ct_at:		call	get_element		;get string, object, method, or variable
 ; Compile term - ^@var
 ;
 ct_upat:	call	get_element		;get variable
-		call	check_variable
+		call	check_var
 		jne	error_eav
 
 		mov	dh,bc_get_field		;compile variable field
@@ -12760,7 +13666,7 @@ get_comma_or_end:
 get_con_int:	push	eax
 
 		call	get_element
-		cmp	al,type_con
+		cmp	al,type_con_int
 		jne	error_eicon
 
 		pop	eax
@@ -12811,35 +13717,6 @@ get_pipe_or_end:
 		inc	eax			;end, z=0
 
 @@exit:		pop	ebx
-		pop	eax
-		ret
-;
-;
-; Scan to ']'
-;
-scan_to_rightb:	push	eax
-		push	ebx
-		push	ecx
-
-		xor	ecx,ecx			;reset nested '[]' counter
-@@nest:		inc	ecx			;inc nest level
-
-@@next:		call	get_element		;get next element
-
-		cmp	al,type_end		;if end of line, error
-		je	error_erightb
-
-		cmp	al,type_leftb		;if '[', inc nest level, get next
-		je	@@nest
-
-		cmp	al,type_rightb		;if not ']', get next
-		jne	@@next
-
-		dec	ecx			;']', dec nest level, get next if nested
-		jnz	@@next
-
-@@done:		pop	ecx			;got it
-		pop	ebx
 		pop	eax
 		ret
 ;
@@ -12896,30 +13773,115 @@ check_bitnot:	cmp	al,type_op		;check for !
 @@ret:		ret
 ;
 ;
-; Scan to right parenthesis
+; Check for ^BYTE, ^WORD, ^LONG, or ^type_con_struct
+; z=1 if found, al=type, ebx=value
+; z=0 if not found
+;
+check_ptr:	call	is_caret		;'^' ?
+		jne	@@ret			;z=0
+
+		call	get_element		;got '^', get next element
+
+		cmp	al,type_size		;BYTE/WORD/LONG?
+		je	@@ret			;z=1
+
+		cmp	al,type_con_struct	;struct?
+		je	@@ret			;z=1
+
+		jmp	error_ebwls		;else, error
+
+@@ret:		ret
+;
+;
+; Check al for type_con_struct (ebx=id) and get struct size
+; z=1 if found, eax=byte_count
+; z=0 if not found
+;
+check_con_struct_size:
+
+		cmp	al,type_con_struct		;struct?
+		je	get_con_struct_size
+
+		ret
+;
+;
+; Get struct size from structure id in ebx
+; on exit, eax=byte_count, z flag same
+;
+get_con_struct_size:
+
+		mov	eax,[struct_id_to_def+ebx*4]	;get offset of struct definition from struct id
+		mov	eax,[dword struct_def+eax]	;get struct size from start of struct definition
+
+		ret
+;
+;
+; Check if structure will fit on stack (15 longs or less)
+; on entry, eax must hold struct size
+;
+check_struct_stack_fit:
+
+		cmp	eax,15*4		;if over 15 longs, error
+		ja	error_stosmne
+
+		ret
+;
+;
+; Scan to ']'
+;
+scan_to_rightb:	push	eax
+		push	ebx
+		push	ecx
+
+		xor	ecx,ecx			;reset nested '[]' counter
+
+@@nest:		inc	ecx			;inc nest level
+
+@@next:		call	get_element		;get next element
+
+		cmp	al,type_end		;if end of line, error
+		je	error_erightb
+
+		cmp	al,type_leftb		;if '[', inc nest level, get next
+		je	@@nest
+
+		cmp	al,type_rightb		;if not ']', get next
+		jne	@@next
+
+		dec	ecx			;']', dec nest level, get next if nested
+		jnz	@@next
+
+@@done:		pop	ecx			;got it
+		pop	ebx
+		pop	eax
+		ret
+;
+;
+; Scan to ')'
 ;
 scan_to_right:	push	eax
 		push	ebx
 		push	ecx
 
-		mov	ecx,0
+		xor	ecx,ecx			;reset nested '()' counter
 
-@@scan:		call	get_element
+@@nest:		inc	ecx			;inc nest level
 
-		cmp	al,type_end
+@@next:		call	get_element		;get next element
+
+		cmp	al,type_end		;if end of line, error
 		je	error_eright
 
-		cmp	al,type_left
-		jne	@@notleft
-		inc	ecx
-		jmp	@@scan
-@@notleft:
-		cmp	al,type_right
-		jne	@@scan
-		dec	ecx
-		jns	@@scan
+		cmp	al,type_left		;if '(', inc nest level, get next
+		je	@@nest
 
-		pop	ecx
+		cmp	al,type_right		;if not ')', get next
+		jne	@@next
+
+		dec	ecx			;')', dec nest level, get next if nested
+		jnz	@@next
+
+@@done:		pop	ecx			;got it
 		pop	ebx
 		pop	eax
 		ret
@@ -12958,7 +13920,7 @@ check_local:	cmp	al,type_dot		;if not dot, exit with c=1
 		cmp	cl,symbol_limit-1	;check symbol size
 		ja	error_sexc
 
-		lea	edi,[symbol+ecx]	;append asm local and 0
+		lea	edi,[symbol+ecx]	;append local digits and 0
 		mov	al,27h
 		stosb
 		mov	eax,[asm_local]
@@ -12976,7 +13938,7 @@ check_local:	cmp	al,type_dot		;if not dot, exit with c=1
 ;
 ; Get obj pub/con symbol
 ; eax[31:24] must hold obj id
-; on exit, al = type_objpub/type_con/type_con_float, ebx = value, z=1 if type_objpub
+; on exit, al = type_objpub/type_con_int/type_con_float, ebx = value, z=1 if type_objpub
 ;
 get_obj_symbol:	push	ecx
 
@@ -12996,12 +13958,12 @@ get_obj_symbol:	push	ecx
 		cmp	al,type_objpub		;if objpub, done, z=1
 		je	@@exit
 
-		cmp	al,type_objcon		;make sure objcon/objcon_float
+		cmp	al,type_objcon_int	;make sure objcon_int/objcon_float
 		je	@@con
 		cmp	al,type_objcon_float
 		jne	error_eaocom
 @@con:
-		sub	al,type_objcon-type_con	;must be objcon, return type_con/type_con_float, z=0
+		sub	al,type_objcon_int-type_con_int		;must be objcon, return type_con_int/type_con_float, z=0
 
 @@exit:		pop	ecx
 		ret
@@ -13040,7 +14002,7 @@ get_filename:	push	edi
 
 @@chr:		call	get_element		;get filename chr
 
-		cmp	al,type_con		;valid constant?
+		cmp	al,type_con_int		;valid constant?
 		jne	@@error
 		mov	eax,ebx
 		cmp	eax,20h
@@ -13105,6 +14067,69 @@ check_align:	cmp	al,type_asm_dir		;check for alignw/alignl
 		ret
 ;
 ;
+; Check for structure type
+; if al is structure type, z=1
+;
+is_struct:	cmp	al,type_con_struct
+		je	@@is
+		cmp	al,type_loc_struct
+		je	@@is
+		cmp	al,type_var_struct
+		je	@@is
+		cmp	al,type_dat_struct
+		jne	is_struct_ptr
+@@is:		ret
+;
+;
+; Check for ptr type
+; al = type
+; if ptr type, z=1
+;
+is_ptr:		cmp	al,type_loc_byte_ptr
+		je	@@is
+		cmp	al,type_var_byte_ptr
+		je	@@is
+		cmp	al,type_loc_word_ptr
+		je	@@is
+		cmp	al,type_var_word_ptr
+		je	@@is
+		cmp	al,type_loc_long_ptr
+		je	@@is
+		cmp	al,type_var_long_ptr
+		jne	is_struct_ptr
+@@is:		ret
+
+is_struct_ptr:	cmp	al,type_loc_struct_ptr
+		je	@@is
+		cmp	al,type_var_struct_ptr
+@@is:		ret
+;
+;
+; Check for ptr val type
+; al = type
+; if ptr val type, z=1
+;
+is_ptr_val:	cmp	al,type_loc_byte_ptr_val
+		je	@@is
+		cmp	al,type_var_byte_ptr_val
+		je	@@is
+		cmp	al,type_loc_word_ptr_val
+		je	@@is
+		cmp	al,type_var_word_ptr_val
+		je	@@is
+		cmp	al,type_loc_long_ptr_val
+		je	@@is
+		cmp	al,type_var_long_ptr_val
+		jne	is_struct_ptr_val
+@@is:		ret
+
+is_struct_ptr_val:
+		cmp	al,type_loc_struct_ptr_val
+		je	@@is
+		cmp	al,type_var_struct_ptr_val
+@@is:		ret
+;
+;
 ; Check for element type
 ; z=1 if match, z=0 if not match
 ;
@@ -13118,6 +14143,10 @@ check_right:	push	eax			;')'
 
 check_leftb:	push	eax			;'['
 		mov	al,type_leftb
+		jmp	check_element
+
+check_rightb:	push	eax			;']'
+		mov	al,type_rightb
 		jmp	check_element
 
 check_comma:	push	eax			;','
@@ -13213,7 +14242,7 @@ skip_index:	call	get_leftb		;get '['
 ; Check for plus
 ; z=1 if '+' or '+.'
 ;
-check_plus:	cmp	al,type_op
+is_plus:	cmp	al,type_op
 		jne	@@exit
 
 		cmp	bl,op_add		;'+' ?
@@ -13222,6 +14251,18 @@ check_plus:	cmp	al,type_op
 		cmp	bl,op_fadd		;'+.' ?
 
 @@exit:		ret
+;
+;
+; Check for '^'
+; z=1 if '^'
+;
+is_caret:	cmp	al,type_op
+		jne	@@exit
+
+		cmp	bl,op_bitxor
+
+@@exit:		ret
+;
 ;
 ;
 ; Convert -constant to constant
@@ -13235,7 +14276,7 @@ negcon_to_con:	cmp	al,type_op
 		push	eax
 		push	ebx
 		call	get_element
-		cmp	al,type_con
+		cmp	al,type_con_int
 		je	@@con
 		cmp	al,type_con_float
 		jne	@@notcon
@@ -13248,7 +14289,7 @@ negcon_to_con:	cmp	al,type_op
 
 @@con:		pop	eax			;constant integer
 		pop	eax
-		mov	al,type_con
+		mov	al,type_con_int
 		neg	ebx
 		jmp	@@exit
 
@@ -13285,6 +14326,17 @@ fsub_to_fneg:	cmp	al,type_op
 		mov	ebx,oc_fneg
 
 @@exit:		ret
+;
+;
+; Enter hub bytecode in al
+;
+enter_hub_bytecode:
+
+		push	eax
+		mov	al,bc_hub_bytecode
+		call	enter_obj
+		pop	eax
+		jmp	enter_obj
 ;
 ;
 ; Enter al/ax/eax into obj
@@ -13472,9 +14524,10 @@ compile_parameters_mptr:
 		ret
 ;
 ;
-; Compile a parameter - accommodates instructions/methods with multiple return values
-; on exit, eax holds number of actual parameters compiled
+; Compile a parameter - accommodates structure pushes and instructions/methods with multiple return values
+; on exit, eax holds number of actual structure longs or parameters compiled
 ;
+;	structure{[]}{.substructure{[]}}	- must be 15 or fewer longs, else error
 ;	rotxy/polxy/xypol
 ;	obj{[]}.method({params,...})
 ;	method({params,...})
@@ -13487,10 +14540,36 @@ compile_parameter:
 		push	edx
 		push	esi
 		push	edi
-		push	[source_ptr]		;save source pointer
+		push	[source_ptr]		;push source pointer
 
 		call	get_element		;get element to check
 
+		push	[source_ptr]		;check for structure > long that is not followed by "==" or "<>"
+		call	check_var
+		jne	@@notstruct
+		call	is_struct		;structure{[]}{.substructure{[]}}{.member{[]}}?
+		jne	@@notstruct
+		pop	eax			;structure, pop source pointer
+		cmp	[compiled_struct_flags],3	;if byte/word/long member, single parameter
+		je	@@single
+		cmp	[compiled_struct_size],4	;if structure fits in a long, single parameter
+		jbe	@@single
+		call	get_element			;if "==" or "<>" follows, single parameter
+		cmp	al,type_op
+		jne	@@notstructcmp
+		cmp	bl,op_e
+		je	@@single
+		cmp	bl,op_ne
+		je	@@single
+@@notstructcmp:	call	back_element
+		mov	eax,[compiled_struct_size]	;structure > long, get long count to push
+		add	eax,11b
+		shr	eax,2
+		mov	dl,0			;compile structure read/push (checks struct size)
+		call	compile_var
+		pop	ebx			;pop source pointer
+		jmp	@@exit
+@@notstruct:	pop	[source_ptr]
 
 		cmp	al,type_i_flex		;flex instruction?
 		jne	@@notflex
@@ -13547,7 +14626,7 @@ compile_parameter:
 		pop	eax			;restore number of results
 		jmp	@@exit
 
-		
+
 @@single:	pop	[source_ptr]		;compile expression
 		call	compile_exp		;will error if no return value
 		mov	eax,1			;set one result
@@ -13617,7 +14696,7 @@ compile_parameter_send:
 		mov	eax,0			;set no result
 		jmp	@@exit
 
-		
+
 @@exp:		pop	[source_ptr]		;compile expression
 		call	compile_exp
 		mov	eax,1			;set one result
@@ -13642,15 +14721,14 @@ check_var_method:
 		push	[source_start]		;save source pointers
 		push	[source_finish]
 
-		call	check_variable		;check for variable
-		mov	ebx,esi			;save variable address in ebx
+		call	check_var		;check for variable
 		jne	@@not			;if not variable, not method
 		call	check_left		;if no '(', not method
 		jne	@@not
 
 		cmp	ch,type_register	;if RECV(), no parameters allowed, one return value
 		jne	@@notrecv
-		cmp	ebx,mrecv_reg
+		cmp	esi,mrecv_reg
 		jne	@@notrecv
 		call	get_right
 		mov	ebx,1
@@ -13658,7 +14736,7 @@ check_var_method:
 @@notrecv:
 		cmp	ch,type_register	;if SEND(param{,...}), parameters allowed, no return value
 		jne	@@notsend
-		cmp	ebx,msend_reg
+		cmp	esi,msend_reg
 		jne	@@notsend
 		call	scan_to_right
 		mov	ebx,0
@@ -13707,74 +14785,165 @@ get_method_ptr:	call	get_element		;get variable name
 		ret
 ;
 ;
+; Get structure and size from struct definition or structure variable
+; on exit, eax holds size
+;
+get_struct_and_size:
+
+		call	get_element			;check for lone type_con_struct (no '[' indicating variable)
+		cmp	al,type_con_struct
+		jne	@@notcon
+		call	check_leftb
+		jne	get_con_struct_size		;if lone type_con_struct, get size (struct id in ebx)
+		call	back_element
+@@notcon:	call	back_element
+
+		call	get_struct_variable		;get structure variable
+		mov	eax,[compiled_struct_size]	;get size
+
+		ret
+;
+;
+; Get structure variable (not byte/word/long member)
+;
+get_struct_variable:
+
+		call	get_variable			;get variable
+
+		mov	al,ch				;must be structure
+		call	is_struct
+		jne	error_easn
+
+		cmp	[compiled_struct_flags],3	;cannot be a byte/word/long member
+		je	error_easn
+
+		ret
+;
+;
 ; Get variable
 ;
 get_variable:	call	get_element
 
-		call	check_variable
+		call	check_var
 		jne	error_eav
 
 		ret
 ;
 ;
 ; Check variable
-; al must hold type
-; ebx must hold value
+; on entry, al must hold type and ebx must hold value
 ; on exit, z=1 if variable with ecx/esi/edi set
 ;
 ;
-;	ecx.31:22 = bitfield constant (5+5 bits)
-;	ecx.19    = bitfield constant flag
-;	ecx.18    = bitfield flag
-;	ecx.17    = index flag
-;	ecx.16    = size override flag
-;	ch=type (type_register/type_loc_byte/type_var_byte/type_dat_byte/type_field/type_size)
-;	cl=size (0=byte/default, 1=word in hub, 2=long in hub)
-;	esi=address (reg/loc/var/dat/hub)
-;	edi=ptr after variable (base/index/bitfield exp)
+;	ecx:31:24  = variable pointer pre/post-inc/dec-push bytecode or 0 for read
+;
+;	ecx.19     = bitfield constant flag
+;	ecx.18     = bitfield flag
+;	ecx.17     = index flag
+;	ecx.16     = size override flag
+;
+;	ch         = type_register
+;	             type_field
+;	             type_size
+;
+;	             type_loc_byte
+;	             type_loc_byte_ptr
+;	             type_var_byte
+;	             type_var_byte_ptr
+;	             type_dat_byte
+;
+;	             type_con_struct
+;	             type_loc_struct
+;	             type_loc_struct_ptr
+;	             type_var_struct
+;	             type_var_struct_ptr
+;	             type_dat_struct
+;
+;	cl         = 0:byte/default
+;	             1:word in hub
+;	             2:long in hub
+;
+;	esi = address (reg/loc/var/dat/hub/struct)
+;	edi = source_ptr after variable (points to [base]/[index]/.[bitfield] exp)
 ;
 ;
-;	field - type_field
-;	------------------
-;
-;	FIELD[memfield]
-;	FIELD[memfield][index]
-;
-;
-;	register - type_register
-;	------------------------
-;
-;	regname
-;	regname.[bitfield]
-;	regname[index]
-;	regname[index].[bitfield]
-;
-;
-;	hub memory - type_loc_???? / type_var_???? / type_dat_???? / type_hub_????
+;	register
 ;	--------------------------------------------------------------------------
-;
-;	hubname{.BYTE/WORD/LONG}
-;	hubname{.BYTE/WORD/LONG}.[bitfield]
-;	hubname{.BYTE/WORD/LONG}[index]
-;	hubname{.BYTE/WORD/LONG}[index].[bitfield]
-;
-;
-;	hub memory - type_size
-;	----------------------
-;
-;	BYTE/WORD/LONG[base]
-;	BYTE/WORD/LONG[base].[bitfield]
-;	BYTE/WORD/LONG[base][index]
-;	BYTE/WORD/LONG[base][index].[bitfield]
+;	type_reg	(REG)
+;	type_register
+;	--------------------------------------------------------------------------
+;	        REG [register] {[index]} {.[bitfield]}
+;	        regname        {[index]} {.[bitfield]}
 ;
 ;
-var_bitfield_con	=	80000h
-var_bitfield_flag	=	40000h
-var_index_flag		=	20000h
-var_size_override	=	10000h
+;	register/hub FIELD
+;	--------------------------------------------------------------------------
+;	type_field	(FIELD)
+;	--------------------------------------------------------------------------
+;	        FIELD [memfield] {[index]}
+;
+;
+;	hub BYTE/WORD/LONG
+;	--------------------------------------------------------------------------
+;	type_size	(BYTE/WORD/LONG)
+;	--------------------------------------------------------------------------
+;	        BYTE/WORD/LONG [base]            {[index]} {.[bitfield]}
+;
+;
+;	hub byte/word/long variable
+;	--------------------------------------------------------------------------
+;	type_loc_byte / type_var_byte / type_dat_byte / type_hub_byte
+;	type_loc_word / type_var_word / type_dat_word / type_hub_word
+;	type_loc_long / type_var_long / type_dat_long / type_hub_long
+;	--------------------------------------------------------------------------
+;	        hubvar         {.BYTE/WORD/LONG} {[index]} {.[bitfield]}
+;
+;
+;	hub byte/word/long variable pointer	(++/-- is byte/word/long sized)
+;	--------------------------------------------------------------------------
+;	type_loc_byte_ptr / type_var_byte_ptr
+;	type_loc_word_ptr / type_var_word_ptr
+;	type_loc_long_ptr / type_var_long_ptr
+;	--------------------------------------------------------------------------
+;	        hubptr         {.BYTE/WORD/LONG} {[index]} {.[bitfield]}
+;	[++/--] hubptr         {.BYTE/WORD/LONG} {[index]} {.[bitfield]}
+;	        hubptr [++/--] {.BYTE/WORD/LONG} {[index]} {.[bitfield]}
+;
+;	       [hubptr]
+;
+;
+;	hub CON STRUCT variable
+;	--------------------------------------------------------------------------
+;	type_con_struct
+;	--------------------------------------------------------------------------
+;	        structname [base] {[index]} {.member {[index]}} {.[bitfield]}
+;
+;
+;	hub struct variable
+;	--------------------------------------------------------------------------
+;	type_loc_struct / type_var_struct / type_dat_struct
+;	--------------------------------------------------------------------------
+;	        structvar         {[index]} {.member {[index]}} {.[bitfield]}
+;
+;
+;	hub struct variable pointer		(++/-- is struct sized)
+;	--------------------------------------------------------------------------
+;	type_loc_struct_ptr / type_var_struct_ptr
+;	--------------------------------------------------------------------------
+;	        structptr         {[index]} {.member {[index]}} {.[bitfield]}
+;	[++/--] structptr         {[index]} {.member {[index]}} {.[bitfield]}
+;	        structptr [++/--] {[index]} {.member {[index]}} {.[bitfield]}
+;
+;	       [structptr]
+;
+;
+var_bitfield_con	=	080000h
+var_bitfield_flag	=	040000h
+var_index_flag		=	020000h
+var_size_override	=	010000h
 
 
-check_variable:	push	eax
+check_var:	push	eax
 		push	ebx
 
 		cmp	al,type_recv		;RECV?
@@ -13789,36 +14958,111 @@ check_variable:	push	eax
 @@notsend:
 		xor	ecx,ecx			;reset flags
 
-		mov	esi,ebx			;trim in case type_dat_???? (cog address in top 12 bits)
-		and	esi,0FFFFFh
+		mov	ch,al			;save type into ch
+		mov	esi,ebx			;save address or struct id into esi
+		mov	edi,[source_ptr]	;save current source pointer into edi
 
-		mov	edi,[source_ptr]	;save current source pointer
 
-		mov	ch,type_loc_byte	;local?
+		call	is_ptr			;ptr{[++/--]} ?
+		jne	@@notpostptr
+		call	check_leftb		;check for '['
+		jne	@@gotptr
+		call	get_element		;get possible ++/--
+		call	check_rightb		;check for ']'
+		jne	@@notpost
+		cmp	al,type_inc		;ptr[++] ?
+		je	@@postinc
+		cmp	al,type_dec		;ptr[--] ?
+		je	@@postdec
+		call	back_element		;not ptr[++/--], back up to after ptr
+@@notpost:	call	back_element
+		call	back_element
+		jmp	@@gotptr		;got ptr[++/--]
+@@postinc:	or	ecx,bc_var_postinc_push shl 24
+		jmp	@@gotptr
+@@postdec:	or	ecx,bc_var_postdec_push shl 24
+		jmp	@@gotptr
+@@notpostptr:
+		cmp	al,type_leftb		;[ptr] or [++/--]ptr ?
+		jne	@@notpreptr
+		call	get_element		;get ptr/++/--
+		call	get_rightb		;get ']'
+		call	is_ptr			;[ptr] ?
+		je	@@ptrval
+		cmp	al,type_inc		;[++] ?
+		je	@@preinc
+		cmp	al,type_dec		;[--] ?
+		je	@@predec
+		jmp	error_eptrid		;else, error
+@@preinc:	or	ecx,bc_var_preinc_push shl 24
+		jmp	@@preptr
+@@predec:	or	ecx,bc_var_predec_push shl 24
+@@preptr:	call	get_element		;got [++/--], get ptr
+		call	is_ptr
+		jne	error_eptr
+		mov	ch,al			;save type into ch
+		mov	esi,ebx			;save value into esi
+		jmp	@@gotptr		;got [++/--]ptr
+
+@@ptrval:	mov	ch,al			;got [ptr], save type into ch
+		add	ch,4			;convert type_???_????_ptr to type_???_????_ptr_val
+		mov	esi,ebx			;save value into esi
+		mov	edi,[source_ptr]	;save current source pointer into edi
+		jmp	@@isvar			;[ptr] cannot have bitfield
+
+@@gotptr:	mov	edi,[source_ptr]	;save current source pointer into edi
+		mov	al,ch			;al=type
+		mov	ebx,esi			;ebx=value
+@@notpreptr:
+
+		call	is_struct		;struct? (struct ptr already handled)
+		jne	@@notstruct
+		call	skip_struct_setup	;skip struct arguments
+		cmp	[compiled_struct_flags],3
+		je	@@chkbitfield		;if struct byte/word/long, may have bitfield
+		jmp	@@isvar			;struct reference cannot have bitfield
+@@notstruct:
+
+		and	esi,0FFFFFh		;strip address of any register field
+
+		mov	ch,type_loc_byte	;loc byte/word/long?
 		cmp	al,ch
 		jb	@@notloc
 		cmp	al,type_loc_long
 		jbe	@@lvdh
 @@notloc:
-		mov	ch,type_var_byte	;var?
+		mov	ch,type_loc_byte_ptr	;loc byte/word/long ptr?
+		cmp	al,ch
+		jb	@@notlocptr
+		cmp	al,type_loc_long_ptr
+		jbe	@@lvdh
+@@notlocptr:
+		mov	ch,type_var_byte	;var byte/word/long?
 		cmp	al,ch
 		jb	@@notvar
 		cmp	al,type_var_long
 		jbe	@@lvdh
 @@notvar:
-		mov	ch,type_dat_byte	;dat?
+		mov	ch,type_var_byte_ptr	;var byte/word/long ptr?
+		cmp	al,ch
+		jb	@@notvarptr
+		cmp	al,type_var_long_ptr
+		jbe	@@lvdh
+@@notvarptr:
+		mov	ch,type_dat_byte	;dat byte/word/long?
 		cmp	al,ch
 		jb	@@notdat
 		cmp	al,type_dat_long
 		jbe	@@lvdh
 @@notdat:
-		mov	ch,type_hub_byte	;hub?
+		mov	ch,type_hub_byte	;hub byte/word/long?
 		cmp	al,ch
 		jb	@@nothub
 		cmp	al,type_hub_long
 		jbe	@@lvdh
 @@nothub:
-		cmp	al,type_reg		;reg?
+
+		cmp	al,type_reg		;reg[address]?
 		jne	@@notreg
 		call	get_leftb
 		mov	bl,10b
@@ -13851,14 +15095,12 @@ check_variable:	push	eax
 		mov	cl,bl			;remember size
 		jmp	@@checkindex
 
-@@lvdh:		call	check_dot		;local/var/dat/hub, check for .BYTE/WORD/LONG
+@@lvdh:		call	check_dot		;loc/var/dat/hub, check for .BYTE/WORD/LONG
 		jne	@@lvdhnodot
 		push	eax			;got '.', check for BYTE/WORD/LONG
-		push	ebx
 		call	get_element
 		cmp	al,type_size
 		mov	cl,bl
-		pop	ebx
 		pop	eax
 		jne	@@lvdhbackup
 		or	ecx,var_size_override	;got .BYTE/WORD/LONG, set size override flag
@@ -13872,7 +15114,7 @@ check_variable:	push	eax
 		jne	@@noindex
 		or	ecx,var_index_flag
 @@noindex:
-		call	check_dot		;check for .[bitfield]
+@@chkbitfield:	call	check_dot		;check for .[bitfield]
 		jne	@@nobf
 		or	ecx,var_bitfield_flag	;set bitfield flag
 		call	get_leftb		;get '['
@@ -13885,6 +15127,7 @@ check_variable:	push	eax
 		jz	@@bfrb
 		and	ecx,not var_bitfield_con
 @@bfrb:		call	get_rightb		;get ']'
+		mov	[compiled_struct_flags],3	;set struct byte/word/long in case disturbed by skip_exp_check_con
 @@nobf:
 @@isvar:	xor	eax,eax			;z=1
 
@@ -13893,12 +15136,17 @@ check_variable:	push	eax
 		ret
 ;
 ;
-; Compile var
-; check_variable must have been called (ecx,esi,edi valid)
+; Compile variable
+; check_var must have been called (ecx,esi,edi valid)
 ; dl must hold operation (0=read, 1=write, 2=setup-assign)
 ; dh must hold any assignment bytecode
 ;
-compile_var:	push	[source_ptr]
+compile_var:	push	eax
+		push	ebx
+		push	ecx
+		push	edx
+		push	[source_ptr]
+
 		mov	[source_ptr],edi	;point after var
 
 
@@ -13906,8 +15154,14 @@ compile_var:	push	[source_ptr]
 		jz	@@nobf
 		test	ecx,var_bitfield_con	;if bitfield-constant, nothing to compile here
 		jnz	@@nobf
+
 		push	[source_ptr]		;save source_ptr
-		cmp	ch,type_size		;if byte/word/long, skip [base]
+		mov	al,ch			;if struct, skip it
+		call	is_struct
+		jne	@@bfnotstruct
+		mov	ebx,esi
+		call	skip_struct_setup
+@@bfnotstruct:	cmp	ch,type_size		;if byte/word/long, skip [base]
 		jne	@@bfnotsize
 		call	skip_index
 @@bfnotsize:	test	ecx,var_size_override	;if size override, skip .BYTE/WORD/LONG
@@ -13930,6 +15184,144 @@ compile_var:	push	[source_ptr]
 @@bfnotspan:	call	get_rightb		;get ']'
 		pop	[source_ptr]		;restore source_ptr
 @@nobf:
+
+		mov	al,ch			;[hubptr/structptr]?
+		call	is_ptr_val
+		jne	@@notptrval
+
+		mov	ebx,1			;set default inc/dec value to 1
+
+		cmp	dl,2			;check for assign plus pre/post-inc/dec
+		jne	@@ptrvalx
+		cmp	dh,bc_var_inc
+		je	@@ptrvalincdec
+		cmp	dh,bc_var_dec
+		je	@@ptrvalincdec
+		cmp	dh,bc_var_preinc_push
+		je	@@ptrvalincdec
+		cmp	dh,bc_var_predec_push
+		je	@@ptrvalincdec
+		cmp	dh,bc_var_postinc_push
+		je	@@ptrvalincdec
+		cmp	dh,bc_var_postdec_push
+		jne	@@ptrvalx
+
+@@ptrvalincdec:	call	is_struct_ptr_val		;pre/post-inc/dec [structptr]?
+		jne	@@ptrvalhub
+		mov	ebx,esi				;get struct size
+		shr	ebx,20
+		call	get_con_struct_size
+		mov	ebx,eax				;if size is 1, no special inc/dec value
+		jmp	@@ptrvalx
+
+@@ptrvalhub:	cmp	ch,type_loc_byte_ptr_val	;pre/post-inc/dec [hubptr]
+		je	@@ptrvalx			;if byte ptr, no special inc/dec value
+		cmp	ch,type_var_byte_ptr_val
+		je	@@ptrvalx
+		mov	ebx,2				;if word ptr, inc/dec value is 2
+		cmp	ch,type_loc_word_ptr_val
+		je	@@ptrvalx
+		cmp	ch,type_var_word_ptr_val
+		je	@@ptrvalx
+		mov	ebx,4				;must be long ptr, inc/dec value is 4
+
+@@ptrvalx:	cmp	ch,type_loc_byte_ptr_val	;convert type_loc/var_????_ptr_val to type_loc/var_byte
+		jb	@@ptrvalvar
+		cmp	ch,type_loc_struct_ptr_val
+		ja	@@ptrvalvar
+		mov	ch,type_loc_byte
+		jmp	@@ptrvalloc
+@@ptrvalvar:	mov	ch,type_var_byte
+@@ptrvalloc:	mov	cl,2			;set long size
+		and	esi,0FFFFFh		;mask away any struct id
+		call	compile_var		;compile pointer variable assign
+		cmp	ebx,1			;if no special inc/dec value, done
+		jz	@@done
+
+		dec	[obj_ptr]		;special inc/dec value, back up over pre/post-inc/dec assign
+		mov	al,bc_set_incdec	;compile inc/dec-value modifier and special inc/dec value
+		call	enter_obj
+		mov	eax,ebx
+		call	compile_rfvar
+		mov	al,dh			;reenter pre/post-inc/dec assign
+		jmp	@@enter
+@@notptrval:
+
+		mov	al,ch			;hubptr/structptr?
+		call	is_ptr
+		jne	@@notptr
+		call	is_struct_ptr		;structptr will be handled as struct
+		je	@@notptr
+
+		push	ecx			;save type, size, and flags
+		push	edx			;save read/write/assign
+		mov	edx,ecx			;check for pre/post-inc/dec-push assign
+		shr	edx,24
+		jz	@@ptrnoas		;if no assign, read (dl=0)
+		mov	dh,dl			;assign, dh=bytecode, dl=2
+		mov	dl,2
+@@ptrnoas:	add	ch,4			;convert type_loc/dat_byte_ptr to type_loc/dat_byte_ptr_val
+		add	ch,cl			;add in size
+		movzx	ecx,cx			;clear all variable flags to inhibit any special compilation
+		call	compile_var		;compile read/assign of pointer variable
+		pop	edx			;restore read/write/assign
+		pop	ecx			;restore type, size, and flags
+
+		test	ecx,var_size_override	;if size override, skip .BYTE/WORD/LONG
+		jz	@@ptrnosor
+		call	get_dot
+		call	get_size
+@@ptrnosor:
+		test	ecx,var_index_flag	;index?
+		mov	al,bc_setup_byte_pa	;without index
+		jz	@@ptrni
+		call	compile_index		;with index
+		mov	al,bc_setup_byte_pb_pi
+@@ptrni:	add	al,cl
+		jmp	@@entersetup
+@@notptr:
+
+		mov	al,ch					;struct?
+		call	is_struct
+		jne	@@notstruct
+
+		mov	ebx,esi					;compile struct setup
+		call	compile_struct_setup
+		cmp	[compiled_struct_flags],3		;if not byte/word/long member, handle (sub)struct
+		jne	@@structnotbwl
+		cmp	ch,type_con_struct			;if type_con_struct, not optimizable, handle bitfield
+		je	@@enterbit
+		cmp	ch,type_loc_struct_ptr			;if type_loc_struct_ptr, not optimizable, handle bitfield
+		je	@@enterbit
+		cmp	ch,type_var_struct_ptr			;if type_var_struct_ptr, not optimizable, handle bitfield
+		je	@@enterbit
+		cmp	[compiled_struct_index_mode],1		;if struct indexing, not optimizable, handle bitfield
+		ja	@@enterbit
+		jne	@@structnindex				;optimize type_loc/var/dat_struct using normal setups, index?
+		or	ecx,var_index_flag			;if index after byte/word/long member, set index flag
+@@structnindex:	sub	ch,3					;convert type_loc/var/dat_struct to type_loc/var/dat_byte
+		mov	cl,[compiled_struct_word_size]		;get 0/1/2 (byte/word/long) size in cl
+		mov	esi,[compiled_struct_address]		;get byte/word/long base-offset address in esi
+		mov	eax,[compiled_struct_source_ptr]	;set source_ptr after byte/word/long member, before any index
+		mov	[source_ptr],eax
+		mov	eax,[compiled_struct_obj_ptr]		;set obj_ptr back to struct setup bytecodes for rewriting
+		mov	[obj_ptr],eax
+		jmp	@@notstruct				;proceed as type_loc/var/dat_byte to use smaller primitive setups
+@@structnotbwl:
+		cmp	dl,2					;assignment?
+		jne	@@structnotass
+		cmp	dh,bc_get_addr				;only @struct is allowed
+		jne	error_oaocbats
+		mov	al,0					;enter 0 to get address
+		jmp	@@enter
+@@structnotass:
+		mov	eax,[compiled_struct_size]		;read or write
+		call	check_struct_stack_fit			;make sure struct fits on stack
+		cmp	dl,1					;if write/pop, enter byte count
+		je	@@enter
+		or	al,80h					;if read/push, enter byte count | 80h
+		jmp	@@enter
+@@notstruct:
 
 		cmp	ch,type_field		;FIELD[memfield]?
 		jne	@@notfield
@@ -13967,23 +15359,26 @@ compile_var:	push	[source_ptr]
 		add	eax,bc_setup_reg_1D8_1F8+8
 		jmp	@@entersetup
 @@notregio:
-		test	ecx,var_index_flag	;index?
+		test	ecx,var_index_flag	;register index?
 		mov	al,bc_setup_reg		;get non-index bytecode
 		jz	@@notregi		;if no index, got bytecode and reg
 		call	@@compileindex		;compile index, checking for constant
 		mov	al,bc_setup_reg_pi	;get index bytecode
 		jnz	@@notregi		;if not constant index, got bytecode and reg
-		mov	al,bc_setup_reg		;constant, revert to non-index bytecode
-		add	esi,[con_value]		;add index into reg
+		mov	al,bc_setup_reg		;constant, revert to non-index bytecode	TESTT could be optimized to use single bytecode
+		call	enter_obj		;enter setup bytecode
+		mov	eax,esi			;get reg address plus index
+		add	eax,[con_value]		;add index into reg
+		jmp	@@regsignx
 @@notregi:	call	enter_obj		;enter setup bytecode
-		mov	eax,esi			;sign-extend to express bottom/top reg addresses in one byte
-		shl	eax,32-9
+		mov	eax,esi			;get reg address
+@@regsignx:	shl	eax,32-9		;sign-extend address to express bottom/top reg addresses in one byte
 		sar	eax,32-9
 		call	compile_rfvars		;compile rfvars for base register
 		jmp	@@enterbit
 @@notreg:
 
-		cmp	ch,type_size		;size BYTE/WORD/LONG?
+		cmp	ch,type_size		;BYTE/WORD/LONG?
 		jne	@@notsize
 		test	ecx,var_index_flag	;index?
 		mov	al,bc_setup_byte_pa	;without index
@@ -14000,6 +15395,7 @@ compile_var:	push	[source_ptr]
 		call	get_dot
 		call	get_size
 @@nosor:
+
 		cmp	ch,type_var_byte	;first 16 var longs with no index?
 		jne	@@notvar16
 		cmp	cl,2			;long?
@@ -14087,8 +15483,12 @@ compile_var:	push	[source_ptr]
 		call	@@compileindex		;compile index, checking for constant
 		jnz	@@baseni		;if not constant, keep compiled index
 		sub	al,3			;constant, revert to non-index bytecode
+		call	enter_obj		;enter setup bytecode
 		shl	[con_value],cl		;scale index constant
-		add	esi,[con_value]		;add index into offset
+		mov	eax,esi			;get offset plus scaled index constant
+		add	eax,[con_value]
+		call	compile_rfvar		;compile rfvar for base offset
+		jmp	@@enterbit
 @@baseni:
 		call	enter_obj		;enter setup bytecode
 		mov	eax,esi			;compile rfvar for base offset
@@ -14126,14 +15526,14 @@ compile_var:	push	[source_ptr]
 		and	[con_value],1Fh
 		or	eax,[con_value]
 @@bitcompile:	cmp	eax,31
-		jbe	@@bitcon031
+		jbe	@@bitcon0to31
 		push	eax			;>31, bitfield-rfvar
 		mov	al,bc_setup_bfield_rfvar
 		call	enter_obj
 		pop	eax
 		call	compile_rfvar
 		jmp	@@bitrightb
-@@bitcon031:	add	al,bc_setup_bfield_0_31	;bitfield-0..31
+@@bitcon0to31:	add	al,bc_setup_bfield_0_31	;bitfield-0..31
 @@bitsetup:	call	enter_obj
 @@bitrightb:	call	get_rightb		;get ']'
 @@nobit:
@@ -14147,7 +15547,11 @@ compile_var:	push	[source_ptr]
 		mov	al,dh			;assign
 @@enter:	call	enter_obj
 
-		pop	[source_ptr]
+@@done:		pop	[source_ptr]
+		pop	edx
+		pop	ecx
+		pop	ebx
+		pop	eax
 		ret
 
 
@@ -14185,26 +15589,481 @@ compile_var_clrset_term:
 
 		mov	al,dl			;var~/var~~ term
 		call	enter_obj		;compile 0/-1
-		mov	dl,2			;(assign)
 		mov	dh,bc_var_swap
-		jmp	compile_var
+		jmp	compile_var_assign
 
 compile_var_exp:
 
 		call	compile_exp		;var := exp, compile expression
-		mov	dl,2			;(assign)
-		jmp	compile_var
+		jmp	compile_var_assign
 
 compile_var_pre:
 
 		call	get_variable		;<unary> var
-		mov	dl,2			;(assign)
-		jmp	compile_var
+		jmp	compile_var_assign
+
+compile_var_addr:
+
+		mov	dh,bc_get_addr		;@var
+		jmp	compile_var_assign
 
 compile_var_assign:
 
 		mov	dl,2			;(assign)
 		jmp	compile_var
+;
+;
+; Compile structure setup
+;
+; on entry:
+;
+;   struct_name[address]{[index]}{{.byte/word/long/struct{[index]} ...}
+;
+;	al = type_con_struct, ebx = struct id
+;
+;   struct_var{[index]}{{.byte/word/long/struct{[index]} ...}
+;
+;	al = type_loc_struct, ebx.[31..20] = struct id, ebx.[19..0] = loc address of structure
+;	al = type_var_struct, ebx.[31..20] = struct id, ebx.[19..0] = var address of structure
+;	al = type_dat_struct, ebx.[31..20] = struct id, ebx.[19..0] = dat address of structure
+;
+;   {[++/--]}struct_ptr{[++/--]}{[index]}{{.byte/word/long/struct{[index]} ...}
+;
+;	al = type_loc_struct_ptr, ebx.[31..20] = struct id, ebx.[19..0] = loc address of ptr, ecx[31..24] = pre/post-inc/dec-push or 0 for read
+;	al = type_var_struct_ptr, ebx.[31..20] = struct id, ebx.[19..0] = var address of ptr, ecx[31..24] = pre/post-inc/dec-push or 0 for read
+;
+; on exit:
+;
+;	compiled_struct_flags.[0]	= index or '.' was found, else base structure
+;	compiled_struct_flags.[1]	= byte/word/long, else base/sub structure
+;
+;	compiled_struct_flags		= 0 if base structure (returns address at runtime)
+;					  1 if index or sub structure (returns address at runtime)
+;					  3 if byte/word/long (performs setup at runtime for read/write/assign)
+;
+;	compiled_struct_id		= id of last structure in expression
+;	compiled_struct_size		= size of last structure in expression
+;	compiled_struct_address		= address of byte/word/long (before any index)
+;	compiled_struct_word_size	= size of member, if present (0/1/2 for byte/word/long)
+;	compiled_struct_source_ptr	= source pointer after byte/word/long member (before [index]/.[bitfield] exp)
+;	compiled_struct_obj_ptr		= obj_ptr of structure-setup bytecodes (after pushed values)
+;
+;	compiled_struct_index_mode	= 0 if no indexes (can be optimized)
+;					  1 if single index on byte/word/long member (can be optimized)
+;					  else other case (cannot be optimized)
+;
+;
+; Optimization is possible if the following are all true:
+;
+;	al				= type_loc/var/dat_struct (not type_con_struct or type_loc/var_struct_ptr)
+;	compiled_struct_flags		= 3 (byte/word/long member, not a structure)
+;	compiled_struct_index_mode	= 0 (no index) or 1 (single index on byte/word/long member)
+;
+;
+; To optimize for compile_var, set registers as follows:
+;
+;	cl		= compiled_struct_word_size (0/1/2 for byte/word/long)
+;	ch		= ch - 3 (type_???_struct --> type_???_byte)
+;	ecx.17		= 1 if compiled_struct_index_mode == 1
+;	esi		= compiled_struct_address
+;	source_ptr	= compiled_struct_source_ptr
+;	obj_ptr		= compiled_struct_obj_ptr
+;
+;
+skip_struct_setup:
+
+		push	[obj_ptr]
+		call	compile_struct_setup
+		pop	[obj_ptr]
+		ret
+
+
+compile_struct_setup:
+
+		push	eax
+		push	ebx
+		push	ecx
+		push	edx
+		push	esi
+		push	edi
+
+		mov	[byte @@struct_type],al		;save structure type
+		mov	[byte @@flags],0		;clear flags
+
+		cmp	al,type_con_struct		;type_con_struct?
+		jne	@@notpopstruct
+		mov	[@@struct_id],ebx		;save id
+		call	get_leftb			;get '['
+		mov	eax,[source_ptr]		;save pop-address expression ptr
+		mov	[@@pop_source_ptr],eax
+		lea	eax,[skip_exp]			;skip expression for now
+		call	@@exp
+		call	get_rightb			;get ']'
+		mov	[@@offset],0			;init offset to zero
+		jmp	@@gotsetup
+@@notpopstruct:
+		call	is_struct_ptr			;type_var/con_struct_ptr?
+		jne	@@notstructptr
+		movzx	eax,al				;arrange compile_var settings for setup pop-address
+		add	al,4				;convert type_loc/var_struct_ptr to type_loc/var_struct_ptr_val
+		shl	eax,8
+		mov	[@@var_ecx],eax			;set type_loc/var_struct_ptr_val
+		shr	ecx,24
+		mov	ah,cl
+		mov	al,2
+		jnz	@@structptras			;if pre/post-inc/dec-push assignment, al=2, ah=bytecode
+		mov	al,0				;else, al=0 for read
+@@structptras:	mov	[@@var_edx],eax			;set pre/post-inc/dec-push assignment or read
+		mov	[@@var_esi],ebx			;set loc/var address
+		mov	eax,[source_ptr]
+		mov	[@@var_edi],eax			;set source ptr
+		shr	ebx,20
+		mov	[@@struct_id],ebx		;save struct id
+		mov	[@@offset],0			;init offset to zero
+		jmp	@@gotsetup
+@@notstructptr:
+		mov	eax,ebx				;type_loc/var/dat_struct
+		shr	eax,20
+		mov	[@@struct_id],eax		;save id
+		and	ebx,0FFFFFh
+		mov	[@@offset],ebx			;init offset loc/var/dat address
+@@gotsetup:
+
+		mov	[@@index_count],0		;{[index]}{{.byte/word/long/struct{[index]} ...}
+
+@@structloop:	mov	eax,[@@struct_id]		;structure, point to structure record
+		lea	esi,[struct_def]
+		add	esi,[struct_id_to_def+eax*4]
+
+		lodsd					;get structure size
+		mov	[@@size],eax
+
+		lodsb					;skip structure name
+		movzx	eax,al
+		add	esi,eax				;point to member list
+
+		call	@@handleindex			;handle structure index
+
+		mov	[byte @@word_size],3		;set word size to 3 in case no member
+
+		call	check_dot			;check for '.'
+		jne	@@compile			;if no '.' then compile setup
+
+		call	check_leftb			;if '.[', bitfield, back up to '.' and compile setup
+		jne	@@notbitfield
+		call	back_element
+		call	back_element
+		jmp	@@compile
+@@notbitfield:
+		or	[byte @@flags],01b		;set index/dot flag
+
+		call	get_symbol			;get symbol, ecx holds length
+		jc	error_easmn
+		mov	[@@symbol_length],ecx
+
+
+@@checkmember:	lodsd					;(next) structure member, get offset
+		mov	[@@member_offset],eax
+		lodsb					;get type
+		mov	[byte @@member_type],al
+		cmp	al,3				;if struct type, get struct id
+		jne	@@notstruct
+		lodsw
+		movzx	eax,ax
+		mov	[@@struct_id],eax
+@@notstruct:	lodsb					;get member name length
+		movzx	ecx,al				;copy member name to symbol2
+		lea	edi,[symbol2]
+	rep	movsb
+
+		mov	ecx,[@@symbol_length]		;compare member name length
+		cmp	cl,al
+		jne	@@notmatch
+
+		push	esi				;compare member name
+		lea	esi,[symbol]
+		lea	edi,[symbol2]
+	repe	cmpsb
+		pop	esi
+		jne	@@notmatch
+
+		mov	eax,[@@member_offset]		;got match, update offset
+		add	[@@offset],eax
+
+		mov	cl,[byte @@member_type]		;loop if structure (3)
+		cmp	cl,3
+		je	@@structloop
+
+		or	[byte @@flags],10b		;byte/word/long (0/1/2), set byte/word/long flag
+
+		mov	[byte @@word_size],cl		;set word size to 0/1/2 for byte word long
+		mov	eax,1				;set size to 1/2/4
+		shl	eax,cl
+		mov	[@@size],eax
+		push	[source_ptr]			;remember source_ptr after byte/word/long member,
+		pop	[@@post_source_ptr]		;..in case single dynamic index
+		push	[@@index_count]			;remember index count
+		call	@@handleindex			;handle byte/word/long index
+		pop	eax				;juxtapose prior index count and current index count
+		shl	eax,2
+		or	eax,[@@index_count]
+		mov	[@@index_mode],eax		;save index mode
+		cmp	al,1				;if no single dynamic index on byte/word/long,
+		je	@@gotindex			;..may be static index, so remember source_ptr
+		push	[source_ptr]
+		pop	[@@post_source_ptr]
+@@gotindex:	jmp	@@compile			;compile setup
+
+@@notmatch:	lodsb					;not found, another member to check?
+		cmp	al,0
+		jne	@@checkmember
+		jmp	error_sdnctn
+
+
+@@compile:	mov	eax,[obj_ptr]			;remember initial obj_ptr in case later optimization
+		mov	[@@initial_obj_ptr],eax
+
+		cmp	[@@index_count],0		;compile any runtime index expressions in push order
+		je	@@noindexexp
+		push	[source_ptr]
+		mov	ecx,0
+@@indexexp:	mov	eax,[@@index_source_ptr+ecx*4]
+		mov	[source_ptr],eax
+		lea	eax,[compile_exp]
+		call	@@exp
+		inc	ecx
+		cmp	ecx,[@@index_count]
+		jne	@@indexexp
+		pop	[source_ptr]
+@@noindexexp:
+		cmp	[byte @@struct_type],type_con_struct	;compile pop address if type_con_struct
+		jne	@@notpopaddr
+		call	back_element			;preserve element history so ci_debug works properly
+		push	[source_ptr]
+		mov	eax,[@@pop_source_ptr]
+		mov	[source_ptr],eax
+		lea	eax,[compile_exp]
+		call	@@exp
+		pop	[source_ptr]
+		call	skip_element			;get one element in history
+@@notpopaddr:
+		mov	al,[byte @@struct_type]		;compile pop address if type_dat/loc_struct_ptr
+		call	is_struct_ptr
+		jne	@@notptr
+		mov	ecx,[@@var_ecx]			;type and long size
+		mov	edx,[@@var_edx]			;pre/post-inc/dec-push assign or read
+		mov	esi,[@@var_esi]			;loc/dat address
+		mov	edi,[@@var_edi]			;source ptr
+		lea	eax,[compile_var]		;compile variable read for pop-address
+		call	@@exp
+@@notptr:
+		mov	ah,[byte @@struct_type]		;enter bytecode
+		cmp	ah,type_loc_struct
+		mov	al,bc_setup_struct_dbase	;type_loc_struct
+		je	@@gotbc
+		cmp	ah,type_var_struct
+		mov	al,bc_setup_struct_vbase	;type_var_struct
+		je	@@gotbc
+		cmp	ah,type_dat_struct
+		mov	al,bc_setup_struct_pbase	;type_dat_struct
+		je	@@gotbc
+		mov	al,bc_setup_struct_pop		;type_con_struct / type_loc_struct_ptr / type_var_struct_ptr
+@@gotbc:	call	enter_obj
+
+		movzx	eax,[byte @@word_size]		;enter rfvar value: 20 address bits, 2 size bits, 2 index-count bits
+		inc	al
+		and	al,11b				;structure/byte/word/long = 0/1/2/3
+		shl	al,2
+		or	al,[byte @@index_count]		;index count = 0..3
+		mov	ebx,[@@offset]
+		shl	ebx,4				;install address
+		or	eax,ebx
+		call	compile_rfvar
+
+		mov	ecx,[@@index_count]		;enter any runtime index sizes in pop order
+		jecxz	@@noindexexp2
+@@indexexp2:	mov	eax,[@@index_size-4+ecx*4]
+		call	compile_rfvar
+		loop	@@indexexp2
+@@noindexexp2:
+		mov	al,[byte @@flags]		;set flags
+		mov	[compiled_struct_flags],al
+
+		mov	eax,[@@struct_id]		;set structure id
+		mov	[compiled_struct_id],eax
+
+		mov	eax,[struct_id_to_def+eax*4]	;set structure size
+		mov	eax,[dword struct_def+eax]
+		mov	[compiled_struct_size],eax
+
+		mov	eax,[@@offset]			;set address
+		mov	[compiled_struct_address],eax
+
+		mov	al,[byte @@word_size]		;set word size
+		mov	[compiled_struct_word_size],al
+
+		mov	eax,[@@post_source_ptr]		;set source_ptr after byte/word/long
+		mov	[compiled_struct_source_ptr],eax
+
+		mov	eax,[@@initial_obj_ptr]		;set initial obj_ptr
+		mov	[compiled_struct_obj_ptr],eax
+
+		mov	al,[byte @@index_mode]		;set index mode
+		mov	[compiled_struct_index_mode],al
+
+		pop	edi
+		pop	esi
+		pop	edx
+		pop	ecx
+		pop	ebx
+		pop	eax
+		ret
+
+
+
+@@handleindex:	call	check_leftb			;check for index
+		je	@@isindex
+		ret
+
+@@isindex:	or	[byte @@flags],01b		;set index/dot flag
+		cmp	[@@size],0FFFFh			;index, error if structure exceeds $FFFF bytes
+		ja	error_iscexb
+		mov	eax,[@@index_count]		;save index expression source pointer and size
+		mov	ebx,[source_ptr]
+		mov	[@@index_source_ptr+eax*4],ebx	;a fourth @@index_source_ptr and @@index_size were
+		mov	ebx,[@@size]			;..needed to accommodate constant-index cases after
+		mov	[@@index_size+eax*4],ebx	;..the limit of three variable-index cases is reached
+		lea	eax,[skip_exp_check_con]	;check if [con] or [exp] without advancing obj_ptr
+		call	@@exp
+		jz	@@indexcon
+		inc	[@@index_count]			;[exp], limit reached?
+		cmp	[@@index_count],3
+		ja	error_loxriee
+		jmp	get_rightb
+
+@@indexcon:	mov	eax,[con_value]			;[con], check range
+		cmp	eax,0FFFFh
+		ja	error_simbf
+		mul	[@@size]			;multiply by size and add to offset
+		or	edx,edx
+		jnz	@@error_sehr
+		cmp	eax,obj_limit
+		ja	@@error_sehr
+		add	[@@offset],eax
+		cmp	[@@offset],obj_limit
+		ja	@@error_sehr
+		jmp	get_rightb
+
+@@error_sehr:	jmp	error_sehr			;error, structure exceeds hub range
+
+
+@@exp:		push	[@@struct_type]			;save state before compiling expression
+		push	[@@flags]
+		push	[@@pop_source_ptr]
+		push	[@@offset]
+		push	[@@var_ecx]
+		push	[@@var_edx]
+		push	[@@var_esi]
+		push	[@@var_edi]
+		push	[@@struct_id]
+		push	[@@symbol_length]
+		push	[@@size]
+		push	[@@word_size]
+		push	[@@member_offset]
+		push	[@@member_type]
+		push	[@@initial_obj_ptr]
+		push	[@@post_source_ptr]
+		push	[@@index_mode]
+		push	[@@index_count]
+		push	[@@index_source_ptr]
+		push	[@@index_source_ptr_1]
+		push	[@@index_source_ptr_2]
+		push	[@@index_source_ptr_3]
+		push	[@@index_size]
+		push	[@@index_size_1]
+		push	[@@index_size_2]
+		push	[@@index_size_3]
+
+		push	eax
+		push	ebx
+		push	ecx
+		push	edx
+		push	esi
+		push	edi
+
+		call	eax				;compile expression (possibly reentrant)
+
+		pop	edi
+		pop	esi
+		pop	edx
+		pop	ecx
+		pop	ebx
+		pop	eax
+
+		pop	[@@index_size_3]		;restore state
+		pop	[@@index_size_2]
+		pop	[@@index_size_1]
+		pop	[@@index_size]
+		pop	[@@index_source_ptr_3]
+		pop	[@@index_source_ptr_2]
+		pop	[@@index_source_ptr_1]
+		pop	[@@index_source_ptr]
+		pop	[@@index_count]
+		pop	[@@index_mode]
+		pop	[@@post_source_ptr]
+		pop	[@@initial_obj_ptr]
+		pop	[@@member_type]
+		pop	[@@member_offset]
+		pop	[@@word_size]
+		pop	[@@size]
+		pop	[@@symbol_length]
+		pop	[@@struct_id]
+		pop	[@@var_edi]
+		pop	[@@var_esi]
+		pop	[@@var_edx]
+		pop	[@@var_ecx]
+		pop	[@@offset]
+		pop	[@@pop_source_ptr]
+		pop	[@@flags]
+		pop	[@@struct_type]
+		ret
+
+
+ddx		@@struct_type
+ddx		@@flags
+ddx		@@pop_source_ptr
+ddx		@@offset
+ddx		@@var_ecx
+ddx		@@var_edx
+ddx		@@var_esi
+ddx		@@var_edi
+ddx		@@struct_id
+ddx		@@symbol_length
+ddx		@@size
+ddx		@@word_size
+ddx		@@member_offset
+ddx		@@member_type
+ddx		@@initial_obj_ptr
+ddx		@@post_source_ptr
+ddx		@@index_mode
+ddx		@@index_count
+ddx		@@index_source_ptr
+ddx		@@index_source_ptr_1
+ddx		@@index_source_ptr_2
+ddx		@@index_source_ptr_3
+ddx		@@index_size
+ddx		@@index_size_1
+ddx		@@index_size_2
+ddx		@@index_size_3
+
+dbx		compiled_struct_flags
+ddx		compiled_struct_id
+ddx		compiled_struct_size
+ddx		compiled_struct_address
+dbx		compiled_struct_word_size
+ddx		compiled_struct_source_ptr
+ddx		compiled_struct_obj_ptr
+dbx		compiled_struct_index_mode
 ;
 ;
 ; Compile constant
@@ -14320,10 +16179,22 @@ compile_branch:	call	enter_obj		;enter branch instruction
 ;
 ; Compile rfvars value in eax
 ;
+compile_rfvars_dat:
+
+		push	eax
+		push	ebx
+		push	esi
+
+		jmp	compile_rfvs
+
+
 compile_rfvars:	push	eax
 		push	ebx
+		push	esi
 
-		shl	eax,3			;mask valid bits
+		lea	esi,[enter_obj]
+
+compile_rfvs:	shl	eax,3			;mask valid bits
 		sar	eax,3
 		mov	ebx,eax
 
@@ -14351,25 +16222,38 @@ compile_rfvars:	push	eax
 @@got2:		call	@@byte
 @@got1:		mov	al,bl
 		and	al,ah
-		call	enter_obj
+		call	esi
 
+		pop	esi
 		pop	ebx
 		pop	eax
 		ret
 
 
-@@byte:		mov	al,bl
+@@byte:		mov	al,bl			;enter byte
 		or	al,80h
 		sar	ebx,7
-		jmp	enter_obj
+		jmp	esi
 ;
 ;
 ; Compile rfvar value in eax
 ;
+compile_rfvar_dat:
+
+		push	eax
+		push	ebx
+		push	esi
+
+		jmp	compile_rfv
+
+
 compile_rfvar:	push	eax
 		push	ebx
+		push	esi
 
-		and	eax,1FFFFFFFh		;mask valid bits
+		lea	esi,[enter_obj]
+
+compile_rfv:	and	eax,1FFFFFFFh		;mask valid bits
 		mov	ebx,eax
 
 		call	@@byte
@@ -14383,15 +16267,15 @@ compile_rfvar:	push	eax
 		shr	ebx,7
 		jz	@@pop
 		or	al,80h
-		jmp	enter_obj
+		jmp	esi
 
 @@pop:		pop	ebx
-@@last:		call	enter_obj
+@@last:		call	esi
 
+		pop	esi
 		pop	ebx
 		pop	eax
 		ret
-
 ;
 ;
 ; Enter data into pub/con list
@@ -14995,7 +16879,7 @@ da_s_branch:	test	edx,1 shl 18
 		add	eax,4
 		and	eax,0FFFFFh
 		mov	cl,5
-		jmp	da_hex		
+		jmp	da_hex
 ;
 ;
 ; Print s ptr
@@ -16246,7 +18130,7 @@ check_dd_num:	push	esi			;save original ptr
 @@nope:		pop	esi			;not a number, restore original ptr
 		stc				;c=1
 		ret
-		
+
 
 @@hex:		lodsb				;hex
 		call	check_hex
@@ -16475,11 +18359,29 @@ enter_symbols_level:
 
 		call	determine_level
 
+		cmp	[spin2_level],44
+		je	error_level44
+
 		cmp	[spin2_level],43
-		jb	@@not
+		jb	@@not43
 		lea	esi,[level43_symbols]
 		call	enter_symbols
-@@not:
+@@not43:
+		cmp	[spin2_level],44
+		jb	@@not44
+		lea	esi,[level44_symbols]
+		call	enter_symbols
+@@not44:
+		cmp	[spin2_level],45
+		jb	@@not45
+		lea	esi,[level45_symbols]
+		call	enter_symbols
+@@not45:
+		cmp	[spin2_level],46
+		jb	@@not46
+		lea	esi,[level46_symbols]
+		call	enter_symbols
+@@not46:
 		ret
 ;
 ;
@@ -16737,7 +18639,7 @@ check_symbol:	push	edx			;preserve hash table index
 		movzx	eax,[byte edx]		;get symbol length
 		inc	edx			;point edi to symbol
 		mov	edi,edx
-		add	edx,eax			;point edx to next link 
+		add	edx,eax			;point edx to next link
 		add	edx,4+1
 		cmp	eax,ecx			;if symbol size mismatch, check next link
 		jne	@@link
@@ -16848,7 +18750,9 @@ enter_symbol2_print:
 ;
 ; Find non-word 3-chr symbol
 ;
-find_symbol_s3:	syms	'+//',	type_op,	oc_remu
+find_symbol_s3:	syms	':=:',	type_swap,	0
+
+		syms	'+//',	type_op,	oc_remu
 		syms	'+<=',	type_op,	oc_lteu
 		syms	'+>=',	type_op,	oc_gteu
 		syms	'<=>',	type_op,	oc_ltegt
@@ -16990,7 +18894,7 @@ automatic_symbols:
 
 	sym	type_file,		0,		'FILE'		;file-related
 
-	sym	type_if,		0,		'IF'		;high-level structures
+	sym	type_if,		0,		'IF'		;high-level flow-control structures
 	sym	type_ifnot,		0,		'IFNOT'
 	sym	type_elseif,		0,		'ELSEIF'
 	sym	type_elseifnot,		0,		'ELSEIFNOT'
@@ -17021,8 +18925,8 @@ automatic_symbols:
 	sym	type_debug,		0,		'DEBUG'		;debug
 
 	sym	type_debug_cmd,		dc_dly,		'DLY'		;debug commands
-	sym	type_debug_cmd,		dc_pc_key	'PC_KEY'
-	sym	type_debug_cmd,		dc_pc_mouse	'PC_MOUSE'
+	sym	type_debug_cmd,		dc_pc_key,	'PC_KEY'
+	sym	type_debug_cmd,		dc_pc_mouse,	'PC_MOUSE'
 
 	sym	type_debug_cmd,		00100100b,	'ZSTR'
 	sym	type_debug_cmd,		00100110b,	'ZSTR_'
@@ -17122,7 +19026,7 @@ automatic_symbols:
 
 	sym	type_debug_cmd,		11100000b,	'SBIN'
 	sym	type_debug_cmd,		11100010b,	'SBIN_'
-	sym	type_debug_cmd,		11100100b,	'SBIN_BYTE_'
+	sym	type_debug_cmd,		11100100b,	'SBIN_BYTE'
 	sym	type_debug_cmd,		11100110b,	'SBIN_BYTE_'
 	sym	type_debug_cmd,		11101000b,	'SBIN_WORD'
 	sym	type_debug_cmd,		11101010b,	'SBIN_WORD_'
@@ -17198,12 +19102,12 @@ automatic_symbols:
 	sym	type_i_flex,		fc_getregs,	'GETREGS'
 	sym	type_i_flex,		fc_setregs,	'SETREGS'
 
-	sym	type_i_flex,		fc_bytemove,	'BYTEMOVE'
 	sym	type_i_flex,		fc_bytefill,	'BYTEFILL'
-	sym	type_i_flex,		fc_wordmove,	'WORDMOVE'
+	sym	type_i_flex,		fc_bytemove,	'BYTEMOVE'
 	sym	type_i_flex,		fc_wordfill,	'WORDFILL'
-	sym	type_i_flex,		fc_longmove,	'LONGMOVE'
+	sym	type_i_flex,		fc_wordmove,	'WORDMOVE'
 	sym	type_i_flex,		fc_longfill,	'LONGFILL'
+	sym	type_i_flex,		fc_longmove,	'LONGMOVE'
 
 	sym	type_i_flex,		fc_strsize,	'STRSIZE'
 	sym	type_i_flex,		fc_strcomp,	'STRCOMP'
@@ -17230,7 +19134,7 @@ automatic_symbols:
 	sym	type_asm_dir,		dir_res,	'RES'
 	sym	type_asm_dir,		dir_fit,	'FIT'
 
-	sym	type_asm_cond,		if_never,	'_RET_'		;assembly conditionals
+	sym	type_asm_cond,		if_ret,		'_RET_'		;assembly conditionals
 	sym	type_asm_cond,		if_nc_and_nz,	'IF_NC_AND_NZ'
 	sym	type_asm_cond,		if_nc_and_nz,	'IF_NZ_AND_NC'
 	sym	type_asm_cond,		if_nc_and_nz,	'IF_GT'
@@ -17577,7 +19481,7 @@ automatic_symbols:
 	sym	type_asm_inst,		ac_pollxrl,	'POLLXRL'
 ;	sym	type_asm_inst,		ac_pollatn,	'POLLATN'	(declared as type_i_flex)
 	sym	type_asm_inst,		ac_pollqmt,	'POLLQMT'
-	
+
 	sym	type_asm_inst,		ac_waitint,	'WAITINT'
 	sym	type_asm_inst,		ac_waitct1,	'WAITCT1'
 	sym	type_asm_inst,		ac_waitct2,	'WAITCT2'
@@ -17746,38 +19650,38 @@ automatic_symbols:
 	sym	type_asm_effect2,	1101b,		'XORZ'
 
 
-	sym	type_con,		if_never,	'_CLR'		;modcz values
-	sym	type_con,		if_nc_and_nz,	'_NC_AND_NZ'
-	sym	type_con,		if_nc_and_nz,	'_NZ_AND_NC'
-	sym	type_con,		if_nc_and_nz,	'_GT'
-	sym	type_con,		if_nc_and_z,	'_NC_AND_Z'
-	sym	type_con,		if_nc_and_z,	'_Z_AND_NC'
-	sym	type_con,		if_nc,		'_NC'
-	sym	type_con,		if_nc,		'_GE'
-	sym	type_con,		if_c_and_nz,	'_C_AND_NZ'
-	sym	type_con,		if_c_and_nz,	'_NZ_AND_C'
-	sym	type_con,		if_nz,		'_NZ'
-	sym	type_con,		if_nz,		'_NE'
-	sym	type_con,		if_c_ne_z,	'_C_NE_Z'
-	sym	type_con,		if_c_ne_z,	'_Z_NE_C'
-	sym	type_con,		if_nc_or_nz,	'_NC_OR_NZ'
-	sym	type_con,		if_nc_or_nz,	'_NZ_OR_NC'
-	sym	type_con,		if_c_and_z,	'_C_AND_Z'
-	sym	type_con,		if_c_and_z,	'_Z_AND_C'
-	sym	type_con,		if_c_eq_z,	'_C_EQ_Z'
-	sym	type_con,		if_c_eq_z,	'_Z_EQ_C'
-	sym	type_con,		if_z,		'_Z'
-	sym	type_con,		if_z,		'_E'
-	sym	type_con,		if_nc_or_z,	'_NC_OR_Z'
-	sym	type_con,		if_nc_or_z,	'_Z_OR_NC'
-	sym	type_con,		if_c,		'_C'
-	sym	type_con,		if_c,		'_LT'
-	sym	type_con,		if_c_or_nz,	'_C_OR_NZ'
-	sym	type_con,		if_c_or_nz,	'_NZ_OR_C'
-	sym	type_con,		if_c_or_z,	'_C_OR_Z'
-	sym	type_con,		if_c_or_z,	'_Z_OR_C'
-	sym	type_con,		if_c_or_z,	'_LE'
-	sym	type_con,		if_always,	'_SET'
+	sym	type_con_int,		if_ret,		'_CLR'		;modcz values
+	sym	type_con_int,		if_nc_and_nz,	'_NC_AND_NZ'
+	sym	type_con_int,		if_nc_and_nz,	'_NZ_AND_NC'
+	sym	type_con_int,		if_nc_and_nz,	'_GT'
+	sym	type_con_int,		if_nc_and_z,	'_NC_AND_Z'
+	sym	type_con_int,		if_nc_and_z,	'_Z_AND_NC'
+	sym	type_con_int,		if_nc,		'_NC'
+	sym	type_con_int,		if_nc,		'_GE'
+	sym	type_con_int,		if_c_and_nz,	'_C_AND_NZ'
+	sym	type_con_int,		if_c_and_nz,	'_NZ_AND_C'
+	sym	type_con_int,		if_nz,		'_NZ'
+	sym	type_con_int,		if_nz,		'_NE'
+	sym	type_con_int,		if_c_ne_z,	'_C_NE_Z'
+	sym	type_con_int,		if_c_ne_z,	'_Z_NE_C'
+	sym	type_con_int,		if_nc_or_nz,	'_NC_OR_NZ'
+	sym	type_con_int,		if_nc_or_nz,	'_NZ_OR_NC'
+	sym	type_con_int,		if_c_and_z,	'_C_AND_Z'
+	sym	type_con_int,		if_c_and_z,	'_Z_AND_C'
+	sym	type_con_int,		if_c_eq_z,	'_C_EQ_Z'
+	sym	type_con_int,		if_c_eq_z,	'_Z_EQ_C'
+	sym	type_con_int,		if_z,		'_Z'
+	sym	type_con_int,		if_z,		'_E'
+	sym	type_con_int,		if_nc_or_z,	'_NC_OR_Z'
+	sym	type_con_int,		if_nc_or_z,	'_Z_OR_NC'
+	sym	type_con_int,		if_c,		'_C'
+	sym	type_con_int,		if_c,		'_LT'
+	sym	type_con_int,		if_c_or_nz,	'_C_OR_NZ'
+	sym	type_con_int,		if_c_or_nz,	'_NZ_OR_C'
+	sym	type_con_int,		if_c_or_z,	'_C_OR_Z'
+	sym	type_con_int,		if_c_or_z,	'_Z_OR_C'
+	sym	type_con_int,		if_c_or_z,	'_LE'
+	sym	type_con_int,		if_always,	'_SET'
 
 
 	sym	type_reg,		0,		'REG'		;reg
@@ -17790,7 +19694,7 @@ automatic_symbols:
 	sym	type_register,		pasm_regs+5,	'PR5'
 	sym	type_register,		pasm_regs+6,	'PR6'
 	sym	type_register,		pasm_regs+7,	'PR7'
-	
+
 	sym	type_register,		1F0h,		'IJMP3'		;interrupt vectors
 	sym	type_register,		1F1h,		'IRET3'
 	sym	type_register,		1F2h,		'IJMP2'
@@ -17815,263 +19719,263 @@ automatic_symbols:
 	sym	type_var_long,		0,		'VARBASE'
 
 
-	sym	type_con,		0,		'FALSE'		;numeric constants
-	sym	type_con,		0FFFFFFFFh,	'TRUE'
-	sym	type_con,		80000000h,	'NEGX'
-	sym	type_con,		7FFFFFFFh,	'POSX'
+	sym	type_con_int,		0,		'FALSE'		;numeric constants
+	sym	type_con_int,		0FFFFFFFFh,	'TRUE'
+	sym	type_con_int,		80000000h,	'NEGX'
+	sym	type_con_int,		7FFFFFFFh,	'POSX'
 	sym	type_con_float,		40490FDBh,	'PI'
 
 
-	sym	type_con,		000000b,	'COGEXEC'	;coginit constants
-	sym	type_con,		100000b,	'HUBEXEC'
-	sym	type_con,		010000b,	'COGEXEC_NEW'
-	sym	type_con,		110000b,	'HUBEXEC_NEW'
-	sym	type_con,		010001b,	'COGEXEC_NEW_PAIR'
-	sym	type_con,		110001b,	'HUBEXEC_NEW_PAIR'
-	sym	type_con,		010000b,	'NEWCOG'	;cogspin constant
+	sym	type_con_int,		000000b,	'COGEXEC'	;coginit constants
+	sym	type_con_int,		100000b,	'HUBEXEC'
+	sym	type_con_int,		010000b,	'COGEXEC_NEW'
+	sym	type_con_int,		110000b,	'HUBEXEC_NEW'
+	sym	type_con_int,		010001b,	'COGEXEC_NEW_PAIR'
+	sym	type_con_int,		110001b,	'HUBEXEC_NEW_PAIR'
+	sym	type_con_int,		010000b,	'NEWCOG'	;cogspin constant
 
 
-	syml	type_con,		0b,	31,	'P_TRUE_A'	;smart pin constants
-	syml	type_con,		1b,	31,	'P_INVERT_A'
+	syml	type_con_int,		0b,	31,	'P_TRUE_A'	;smart pin constants
+	syml	type_con_int,		1b,	31,	'P_INVERT_A'
 
-	syml	type_con,		000b,	28,	'P_LOCAL_A'
-	syml	type_con,		001b,	28,	'P_PLUS1_A'
-	syml	type_con,		010b,	28,	'P_PLUS2_A'
-	syml	type_con,		011b,	28,	'P_PLUS3_A'
-	syml	type_con,		100b,	28,	'P_OUTBIT_A'
-	syml	type_con,		101b,	28,	'P_MINUS3_A'
-	syml	type_con,		110b,	28,	'P_MINUS2_A'
-	syml	type_con,		111b,	28,	'P_MINUS1_A'
+	syml	type_con_int,		000b,	28,	'P_LOCAL_A'
+	syml	type_con_int,		001b,	28,	'P_PLUS1_A'
+	syml	type_con_int,		010b,	28,	'P_PLUS2_A'
+	syml	type_con_int,		011b,	28,	'P_PLUS3_A'
+	syml	type_con_int,		100b,	28,	'P_OUTBIT_A'
+	syml	type_con_int,		101b,	28,	'P_MINUS3_A'
+	syml	type_con_int,		110b,	28,	'P_MINUS2_A'
+	syml	type_con_int,		111b,	28,	'P_MINUS1_A'
 
-	syml	type_con,		0b,	27,	'P_TRUE_B'
-	syml	type_con,		1b,	27,	'P_INVERT_B'
+	syml	type_con_int,		0b,	27,	'P_TRUE_B'
+	syml	type_con_int,		1b,	27,	'P_INVERT_B'
 
-	syml	type_con,		000b,	24,	'P_LOCAL_B'
-	syml	type_con,		001b,	24,	'P_PLUS1_B'
-	syml	type_con,		010b,	24,	'P_PLUS2_B'
-	syml	type_con,		011b,	24,	'P_PLUS3_B'
-	syml	type_con,		100b,	24,	'P_OUTBIT_B'
-	syml	type_con,		101b,	24,	'P_MINUS3_B'
-	syml	type_con,		110b,	24,	'P_MINUS2_B'
-	syml	type_con,		111b,	24,	'P_MINUS1_B'
+	syml	type_con_int,		000b,	24,	'P_LOCAL_B'
+	syml	type_con_int,		001b,	24,	'P_PLUS1_B'
+	syml	type_con_int,		010b,	24,	'P_PLUS2_B'
+	syml	type_con_int,		011b,	24,	'P_PLUS3_B'
+	syml	type_con_int,		100b,	24,	'P_OUTBIT_B'
+	syml	type_con_int,		101b,	24,	'P_MINUS3_B'
+	syml	type_con_int,		110b,	24,	'P_MINUS2_B'
+	syml	type_con_int,		111b,	24,	'P_MINUS1_B'
 
-	syml	type_con,		000b,	21,	'P_PASS_AB'
-	syml	type_con,		001b,	21,	'P_AND_AB'
-	syml	type_con,		010b,	21,	'P_OR_AB'
-	syml	type_con,		011b,	21,	'P_XOR_AB'
-	syml	type_con,		100b,	21,	'P_FILT0_AB'
-	syml	type_con,		101b,	21,	'P_FILT1_AB'
-	syml	type_con,		110b,	21,	'P_FILT2_AB'
-	syml	type_con,		111b,	21,	'P_FILT3_AB'
+	syml	type_con_int,		000b,	21,	'P_PASS_AB'
+	syml	type_con_int,		001b,	21,	'P_AND_AB'
+	syml	type_con_int,		010b,	21,	'P_OR_AB'
+	syml	type_con_int,		011b,	21,	'P_XOR_AB'
+	syml	type_con_int,		100b,	21,	'P_FILT0_AB'
+	syml	type_con_int,		101b,	21,	'P_FILT1_AB'
+	syml	type_con_int,		110b,	21,	'P_FILT2_AB'
+	syml	type_con_int,		111b,	21,	'P_FILT3_AB'
 
-	syml	type_con,		0000b,	17,	'P_LOGIC_A'
-	syml	type_con,		0001b,	17,	'P_LOGIC_A_FB'
-	syml	type_con,		0010b,	17,	'P_LOGIC_B_FB'
-	syml	type_con,		0011b,	17,	'P_SCHMITT_A'
-	syml	type_con,		0100b,	17,	'P_SCHMITT_A_FB'
-	syml	type_con,		0101b,	17,	'P_SCHMITT_B_FB'
-	syml	type_con,		0110b,	17,	'P_COMPARE_AB'
-	syml	type_con,		0111b,	17,	'P_COMPARE_AB_FB'
+	syml	type_con_int,		0000b,	17,	'P_LOGIC_A'
+	syml	type_con_int,		0001b,	17,	'P_LOGIC_A_FB'
+	syml	type_con_int,		0010b,	17,	'P_LOGIC_B_FB'
+	syml	type_con_int,		0011b,	17,	'P_SCHMITT_A'
+	syml	type_con_int,		0100b,	17,	'P_SCHMITT_A_FB'
+	syml	type_con_int,		0101b,	17,	'P_SCHMITT_B_FB'
+	syml	type_con_int,		0110b,	17,	'P_COMPARE_AB'
+	syml	type_con_int,		0111b,	17,	'P_COMPARE_AB_FB'
 
-	syml	type_con,		100000b,15,	'P_ADC_GIO'
-	syml	type_con,		100001b,15,	'P_ADC_VIO'
-	syml	type_con,		100010b,15,	'P_ADC_FLOAT'
-	syml	type_con,		100011b,15,	'P_ADC_1X'
-	syml	type_con,		100100b,15,	'P_ADC_3X'
-	syml	type_con,		100101b,15,	'P_ADC_10X'
-	syml	type_con,		100110b,15,	'P_ADC_30X'
-	syml	type_con,		100111b,15,	'P_ADC_100X'
+	syml	type_con_int,		100000b,15,	'P_ADC_GIO'
+	syml	type_con_int,		100001b,15,	'P_ADC_VIO'
+	syml	type_con_int,		100010b,15,	'P_ADC_FLOAT'
+	syml	type_con_int,		100011b,15,	'P_ADC_1X'
+	syml	type_con_int,		100100b,15,	'P_ADC_3X'
+	syml	type_con_int,		100101b,15,	'P_ADC_10X'
+	syml	type_con_int,		100110b,15,	'P_ADC_30X'
+	syml	type_con_int,		100111b,15,	'P_ADC_100X'
 
-	syml	type_con,		10100b,	16,	'P_DAC_990R_3V'
-	syml	type_con,		10101b,	16,	'P_DAC_600R_2V'
-	syml	type_con,		10110b,	16,	'P_DAC_124R_3V'
-	syml	type_con,		10111b,	16,	'P_DAC_75R_2V'
+	syml	type_con_int,		10100b,	16,	'P_DAC_990R_3V'
+	syml	type_con_int,		10101b,	16,	'P_DAC_600R_2V'
+	syml	type_con_int,		10110b,	16,	'P_DAC_124R_3V'
+	syml	type_con_int,		10111b,	16,	'P_DAC_75R_2V'
 
-	syml	type_con,		1100b,	17,	'P_LEVEL_A'
-	syml	type_con,		1101b,	17,	'P_LEVEL_A_FBN'
-	syml	type_con,		1110b,	17,	'P_LEVEL_B_FBP'
-	syml	type_con,		1111b,	17,	'P_LEVEL_B_FBN'
+	syml	type_con_int,		1100b,	17,	'P_LEVEL_A'
+	syml	type_con_int,		1101b,	17,	'P_LEVEL_A_FBN'
+	syml	type_con_int,		1110b,	17,	'P_LEVEL_B_FBP'
+	syml	type_con_int,		1111b,	17,	'P_LEVEL_B_FBN'
 
-	syml	type_con,		0b,	16,	'P_ASYNC_IO'
-	syml	type_con,		1b,	16,	'P_SYNC_IO'
+	syml	type_con_int,		0b,	16,	'P_ASYNC_IO'
+	syml	type_con_int,		1b,	16,	'P_SYNC_IO'
 
-	syml	type_con,		0b,	15,	'P_TRUE_IN'
-	syml	type_con,		1b,	15,	'P_INVERT_IN'
+	syml	type_con_int,		0b,	15,	'P_TRUE_IN'
+	syml	type_con_int,		1b,	15,	'P_INVERT_IN'
 
-	syml	type_con,		0b,	14,	'P_TRUE_OUTPUT'		;TESTT change to P_TRUE_OUT
-	syml	type_con,		0b,	14,	'P_TRUE_OUT'
-	syml	type_con,		1b,	14,	'P_INVERT_OUTPUT'	;TESTT change P_INVERT_OUT
-	syml	type_con,		1b,	14,	'P_INVERT_OUT'
+	syml	type_con_int,		0b,	14,	'P_TRUE_OUTPUT'		;added P_TRUE_OUT
+	syml	type_con_int,		0b,	14,	'P_TRUE_OUT'
+	syml	type_con_int,		1b,	14,	'P_INVERT_OUTPUT'	;added P_INVERT_OUT
+	syml	type_con_int,		1b,	14,	'P_INVERT_OUT'
 
-	syml	type_con,		000b,	11,	'P_HIGH_FAST'
-	syml	type_con,		001b,	11,	'P_HIGH_1K5'
-	syml	type_con,		010b,	11,	'P_HIGH_15K'
-	syml	type_con,		011b,	11,	'P_HIGH_150K'
-	syml	type_con,		100b,	11,	'P_HIGH_1MA'
-	syml	type_con,		101b,	11,	'P_HIGH_100UA'
-	syml	type_con,		110b,	11,	'P_HIGH_10UA'
-	syml	type_con,		111b,	11,	'P_HIGH_FLOAT'
+	syml	type_con_int,		000b,	11,	'P_HIGH_FAST'
+	syml	type_con_int,		001b,	11,	'P_HIGH_1K5'
+	syml	type_con_int,		010b,	11,	'P_HIGH_15K'
+	syml	type_con_int,		011b,	11,	'P_HIGH_150K'
+	syml	type_con_int,		100b,	11,	'P_HIGH_1MA'
+	syml	type_con_int,		101b,	11,	'P_HIGH_100UA'
+	syml	type_con_int,		110b,	11,	'P_HIGH_10UA'
+	syml	type_con_int,		111b,	11,	'P_HIGH_FLOAT'
 
-	syml	type_con,		000b,	8,	'P_LOW_FAST'
-	syml	type_con,		001b,	8,	'P_LOW_1K5'
-	syml	type_con,		010b,	8,	'P_LOW_15K'
-	syml	type_con,		011b,	8,	'P_LOW_150K'
-	syml	type_con,		100b,	8,	'P_LOW_1MA'
-	syml	type_con,		101b,	8,	'P_LOW_100UA'
-	syml	type_con,		110b,	8,	'P_LOW_10UA'
-	syml	type_con,		111b,	8,	'P_LOW_FLOAT'
+	syml	type_con_int,		000b,	8,	'P_LOW_FAST'
+	syml	type_con_int,		001b,	8,	'P_LOW_1K5'
+	syml	type_con_int,		010b,	8,	'P_LOW_15K'
+	syml	type_con_int,		011b,	8,	'P_LOW_150K'
+	syml	type_con_int,		100b,	8,	'P_LOW_1MA'
+	syml	type_con_int,		101b,	8,	'P_LOW_100UA'
+	syml	type_con_int,		110b,	8,	'P_LOW_10UA'
+	syml	type_con_int,		111b,	8,	'P_LOW_FLOAT'
 
-	syml	type_con,		00b,	6,	'P_TT_00'
-	syml	type_con,		01b,	6,	'P_TT_01'
-	syml	type_con,		10b,	6,	'P_TT_10'
-	syml	type_con,		11b,	6,	'P_TT_11'
-	syml	type_con,		01b,	6,	'P_OE'
-	syml	type_con,		01b,	6,	'P_CHANNEL'
-	syml	type_con,		10b,	6,	'P_BITDAC'
+	syml	type_con_int,		00b,	6,	'P_TT_00'
+	syml	type_con_int,		01b,	6,	'P_TT_01'
+	syml	type_con_int,		10b,	6,	'P_TT_10'
+	syml	type_con_int,		11b,	6,	'P_TT_11'
+	syml	type_con_int,		01b,	6,	'P_OE'
+	syml	type_con_int,		01b,	6,	'P_CHANNEL'
+	syml	type_con_int,		10b,	6,	'P_BITDAC'
 
-	syml	type_con,		00000b,	1,	'P_NORMAL'
-	syml	type_con,		00001b,	1,	'P_REPOSITORY'
-	syml	type_con,		00001b,	1,	'P_DAC_NOISE'
-	syml	type_con,		00010b,	1,	'P_DAC_DITHER_RND'
-	syml	type_con,		00011b,	1,	'P_DAC_DITHER_PWM'
-	syml	type_con,		00100b,	1,	'P_PULSE'
-	syml	type_con,		00101b,	1,	'P_TRANSITION'
-	syml	type_con,		00110b,	1,	'P_NCO_FREQ'
-	syml	type_con,		00111b,	1,	'P_NCO_DUTY'
-	syml	type_con,		01000b,	1,	'P_PWM_TRIANGLE'
-	syml	type_con,		01001b,	1,	'P_PWM_SAWTOOTH'
-	syml	type_con,		01010b,	1,	'P_PWM_SMPS'
-	syml	type_con,		01011b,	1,	'P_QUADRATURE'
-	syml	type_con,		01100b,	1,	'P_REG_UP'
-	syml	type_con,		01101b,	1,	'P_REG_UP_DOWN'
-	syml	type_con,		01110b,	1,	'P_COUNT_RISES'
-	syml	type_con,		01111b,	1,	'P_COUNT_HIGHS'
-	syml	type_con,		10000b,	1,	'P_STATE_TICKS'
-	syml	type_con,		10001b,	1,	'P_HIGH_TICKS'
-	syml	type_con,		10010b,	1,	'P_EVENTS_TICKS'
-	syml	type_con,		10011b,	1,	'P_PERIODS_TICKS'
-	syml	type_con,		10100b,	1,	'P_PERIODS_HIGHS'
-	syml	type_con,		10101b,	1,	'P_COUNTER_TICKS'
-	syml	type_con,		10110b,	1,	'P_COUNTER_HIGHS'
-	syml	type_con,		10111b,	1,	'P_COUNTER_PERIODS'
-	syml	type_con,		11000b,	1,	'P_ADC'
-	syml	type_con,		11001b,	1,	'P_ADC_EXT'
-	syml	type_con,		11010b,	1,	'P_ADC_SCOPE'
-	syml	type_con,		11011b,	1,	'P_USB_PAIR'
-	syml	type_con,		11100b,	1,	'P_SYNC_TX'
-	syml	type_con,		11101b,	1,	'P_SYNC_RX'
-	syml	type_con,		11110b,	1,	'P_ASYNC_TX'
-	syml	type_con,		11111b,	1,	'P_ASYNC_RX'
-
-
-	syml	type_con,		0000h,	16,	'X_IMM_32X1_LUT'	;streamer constants
-	syml	type_con,		1000h,	16,	'X_IMM_16X2_LUT'
-	syml	type_con,		2000h,	16,	'X_IMM_8X4_LUT'
-	syml	type_con,		3000h,	16,	'X_IMM_4X8_LUT'
-
-	syml	type_con,		4000h,	16,	'X_IMM_32X1_1DAC1'
-	syml	type_con,		5000h,	16,	'X_IMM_16X2_2DAC1'
-	syml	type_con,		5002h,	16,	'X_IMM_16X2_1DAC2'
-	syml	type_con,		6000h,	16,	'X_IMM_8X4_4DAC1'
-	syml	type_con,		6002h,	16,	'X_IMM_8X4_2DAC2'
-	syml	type_con,		6004h,	16,	'X_IMM_8X4_1DAC4'
-	syml	type_con,		6006h,	16,	'X_IMM_4X8_4DAC2'
-	syml	type_con,		6007h,	16,	'X_IMM_4X8_2DAC4'
-	syml	type_con,		600Eh,	16,	'X_IMM_4X8_1DAC8'
-	syml	type_con,		600Fh,	16,	'X_IMM_2X16_4DAC4'
-	syml	type_con,		7000h,	16,	'X_IMM_2X16_2DAC8'
-	syml	type_con,		7001h,	16,	'X_IMM_1X32_4DAC8'
-
-	syml	type_con,		7002h,	16,	'X_RFLONG_32X1_LUT'
-	syml	type_con,		7004h,	16,	'X_RFLONG_16X2_LUT'
-	syml	type_con,		7006h,	16,	'X_RFLONG_8X4_LUT'
-	syml	type_con,		7008h,	16,	'X_RFLONG_4X8_LUT'
-
-	syml	type_con,		08000h,	16,	'X_RFBYTE_1P_1DAC1'
-	syml	type_con,		09000h,	16,	'X_RFBYTE_2P_2DAC1'
-	syml	type_con,		09002h,	16,	'X_RFBYTE_2P_1DAC2'
-	syml	type_con,		0A000h,	16,	'X_RFBYTE_4P_4DAC1'
-	syml	type_con,		0A002h,	16,	'X_RFBYTE_4P_2DAC2'
-	syml	type_con,		0A004h,	16,	'X_RFBYTE_4P_1DAC4'
-	syml	type_con,		0A006h,	16,	'X_RFBYTE_8P_4DAC2'
-	syml	type_con,		0A007h,	16,	'X_RFBYTE_8P_2DAC4'
-	syml	type_con,		0A00Eh,	16,	'X_RFBYTE_8P_1DAC8'
-	syml	type_con,		0A00Fh,	16,	'X_RFWORD_16P_4DAC4'
-	syml	type_con,		0B000h,	16,	'X_RFWORD_16P_2DAC8'
-	syml	type_con,		0B001h,	16,	'X_RFLONG_32P_4DAC8'
-
-	syml	type_con,		0B002h,	16,	'X_RFBYTE_LUMA8'
-	syml	type_con,		0B003h,	16,	'X_RFBYTE_RGBI8'
-	syml	type_con,		0B004h,	16,	'X_RFBYTE_RGB8'
-	syml	type_con,		0B005h,	16,	'X_RFWORD_RGB16'
-	syml	type_con,		0B006h,	16,	'X_RFLONG_RGB24'
-
-	syml	type_con,		0C000h,	16,	'X_1P_1DAC1_WFBYTE'
-	syml	type_con,		0D000h,	16,	'X_2P_2DAC1_WFBYTE'
-	syml	type_con,		0D002h,	16,	'X_2P_1DAC2_WFBYTE'
-	syml	type_con,		0E000h,	16,	'X_4P_4DAC1_WFBYTE'
-	syml	type_con,		0E002h,	16,	'X_4P_2DAC2_WFBYTE'
-	syml	type_con,		0E004h,	16,	'X_4P_1DAC4_WFBYTE'
-	syml	type_con,		0E006h,	16,	'X_8P_4DAC2_WFBYTE'
-	syml	type_con,		0E007h,	16,	'X_8P_2DAC4_WFBYTE'
-	syml	type_con,		0E00Eh,	16,	'X_8P_1DAC8_WFBYTE'
-	syml	type_con,		0E00Fh,	16,	'X_16P_4DAC4_WFWORD'
-	syml	type_con,		0F000h,	16,	'X_16P_2DAC8_WFWORD'
-	syml	type_con,		0F001h,	16,	'X_32P_4DAC8_WFLONG'
-
-	syml	type_con,		0F002h,	16,	'X_1ADC8_0P_1DAC8_WFBYTE'
-	syml	type_con,		0F003h,	16,	'X_1ADC8_8P_2DAC8_WFWORD'
-	syml	type_con,		0F004h,	16,	'X_2ADC8_0P_2DAC8_WFWORD'
-	syml	type_con,		0F005h,	16,	'X_2ADC8_16P_4DAC8_WFLONG'
-	syml	type_con,		0F006h,	16,	'X_4ADC8_0P_4DAC8_WFLONG'
-
-	syml	type_con,		0F007h,	16,	'X_DDS_GOERTZEL_SINC1'
-	syml	type_con,		0F087h,	16,	'X_DDS_GOERTZEL_SINC2'
-
-	syml	type_con,		0000h,	16,	'X_DACS_OFF'
-	syml	type_con,		0100h,	16,	'X_DACS_0_0_0_0'
-	syml	type_con,		0200h,	16,	'X_DACS_X_X_0_0'
-	syml	type_con,		0300h,	16,	'X_DACS_0_0_X_X'
-	syml	type_con,		0400h,	16,	'X_DACS_X_X_X_0'
-	syml	type_con,		0500h,	16,	'X_DACS_X_X_0_X'
-	syml	type_con,		0600h,	16,	'X_DACS_X_0_X_X'
-	syml	type_con,		0700h,	16,	'X_DACS_0_X_X_X'
-	syml	type_con,		0800h,	16,	'X_DACS_0N0_0N0'
-	syml	type_con,		0900h,	16,	'X_DACS_X_X_0N0'
-	syml	type_con,		0A00h,	16,	'X_DACS_0N0_X_X'
-	syml	type_con,		0B00h,	16,	'X_DACS_1_0_1_0'
-	syml	type_con,		0C00h,	16,	'X_DACS_X_X_1_0'
-	syml	type_con,		0D00h,	16,	'X_DACS_1_0_X_X'
-	syml	type_con,		0E00h,	16,	'X_DACS_1N1_0N0'
-	syml	type_con,		0F00h,	16,	'X_DACS_3_2_1_0'
-
-	syml	type_con,		0000h,	16,	'X_PINS_OFF'
-	syml	type_con,		0080h,	16,	'X_PINS_ON'
-
-	syml	type_con,		0000h,	16,	'X_WRITE_OFF'
-	syml	type_con,		0080h,	16,	'X_WRITE_ON'
-
-	syml	type_con,		0000h,	16,	'X_ALT_OFF'
-	syml	type_con,		0001h,	16,	'X_ALT_ON'
+	syml	type_con_int,		00000b,	1,	'P_NORMAL'
+	syml	type_con_int,		00001b,	1,	'P_REPOSITORY'
+	syml	type_con_int,		00001b,	1,	'P_DAC_NOISE'
+	syml	type_con_int,		00010b,	1,	'P_DAC_DITHER_RND'
+	syml	type_con_int,		00011b,	1,	'P_DAC_DITHER_PWM'
+	syml	type_con_int,		00100b,	1,	'P_PULSE'
+	syml	type_con_int,		00101b,	1,	'P_TRANSITION'
+	syml	type_con_int,		00110b,	1,	'P_NCO_FREQ'
+	syml	type_con_int,		00111b,	1,	'P_NCO_DUTY'
+	syml	type_con_int,		01000b,	1,	'P_PWM_TRIANGLE'
+	syml	type_con_int,		01001b,	1,	'P_PWM_SAWTOOTH'
+	syml	type_con_int,		01010b,	1,	'P_PWM_SMPS'
+	syml	type_con_int,		01011b,	1,	'P_QUADRATURE'
+	syml	type_con_int,		01100b,	1,	'P_REG_UP'
+	syml	type_con_int,		01101b,	1,	'P_REG_UP_DOWN'
+	syml	type_con_int,		01110b,	1,	'P_COUNT_RISES'
+	syml	type_con_int,		01111b,	1,	'P_COUNT_HIGHS'
+	syml	type_con_int,		10000b,	1,	'P_STATE_TICKS'
+	syml	type_con_int,		10001b,	1,	'P_HIGH_TICKS'
+	syml	type_con_int,		10010b,	1,	'P_EVENTS_TICKS'
+	syml	type_con_int,		10011b,	1,	'P_PERIODS_TICKS'
+	syml	type_con_int,		10100b,	1,	'P_PERIODS_HIGHS'
+	syml	type_con_int,		10101b,	1,	'P_COUNTER_TICKS'
+	syml	type_con_int,		10110b,	1,	'P_COUNTER_HIGHS'
+	syml	type_con_int,		10111b,	1,	'P_COUNTER_PERIODS'
+	syml	type_con_int,		11000b,	1,	'P_ADC'
+	syml	type_con_int,		11001b,	1,	'P_ADC_EXT'
+	syml	type_con_int,		11010b,	1,	'P_ADC_SCOPE'
+	syml	type_con_int,		11011b,	1,	'P_USB_PAIR'
+	syml	type_con_int,		11100b,	1,	'P_SYNC_TX'
+	syml	type_con_int,		11101b,	1,	'P_SYNC_RX'
+	syml	type_con_int,		11110b,	1,	'P_ASYNC_TX'
+	syml	type_con_int,		11111b,	1,	'P_ASYNC_RX'
 
 
-	sym	type_con,		0,		'INT_OFF'		;event/interrupt constants
-	sym	type_con,		0,		'EVENT_INT'
-	sym	type_con,		1,		'EVENT_CT1'
-	sym	type_con,		2,		'EVENT_CT2'
-	sym	type_con,		3,		'EVENT_CT3'
-	sym	type_con,		4,		'EVENT_SE1'
-	sym	type_con,		5,		'EVENT_SE2'
-	sym	type_con,		6,		'EVENT_SE3'
-	sym	type_con,		7,		'EVENT_SE4'
-	sym	type_con,		8,		'EVENT_PAT'
-	sym	type_con,		9,		'EVENT_FBW'
-	sym	type_con,		10,		'EVENT_XMT'
-	sym	type_con,		11,		'EVENT_XFI'
-	sym	type_con,		12,		'EVENT_XRO'
-	sym	type_con,		13,		'EVENT_XRL'
-	sym	type_con,		14,		'EVENT_ATN'
-	sym	type_con,		15,		'EVENT_QMT'
+	syml	type_con_int,		0000h,	16,	'X_IMM_32X1_LUT'	;streamer constants
+	syml	type_con_int,		1000h,	16,	'X_IMM_16X2_LUT'
+	syml	type_con_int,		2000h,	16,	'X_IMM_8X4_LUT'
+	syml	type_con_int,		3000h,	16,	'X_IMM_4X8_LUT'
+
+	syml	type_con_int,		4000h,	16,	'X_IMM_32X1_1DAC1'
+	syml	type_con_int,		5000h,	16,	'X_IMM_16X2_2DAC1'
+	syml	type_con_int,		5002h,	16,	'X_IMM_16X2_1DAC2'
+	syml	type_con_int,		6000h,	16,	'X_IMM_8X4_4DAC1'
+	syml	type_con_int,		6002h,	16,	'X_IMM_8X4_2DAC2'
+	syml	type_con_int,		6004h,	16,	'X_IMM_8X4_1DAC4'
+	syml	type_con_int,		6006h,	16,	'X_IMM_4X8_4DAC2'
+	syml	type_con_int,		6007h,	16,	'X_IMM_4X8_2DAC4'
+	syml	type_con_int,		600Eh,	16,	'X_IMM_4X8_1DAC8'
+	syml	type_con_int,		600Fh,	16,	'X_IMM_2X16_4DAC4'
+	syml	type_con_int,		7000h,	16,	'X_IMM_2X16_2DAC8'
+	syml	type_con_int,		7001h,	16,	'X_IMM_1X32_4DAC8'
+
+	syml	type_con_int,		7002h,	16,	'X_RFLONG_32X1_LUT'
+	syml	type_con_int,		7004h,	16,	'X_RFLONG_16X2_LUT'
+	syml	type_con_int,		7006h,	16,	'X_RFLONG_8X4_LUT'
+	syml	type_con_int,		7008h,	16,	'X_RFLONG_4X8_LUT'
+
+	syml	type_con_int,		08000h,	16,	'X_RFBYTE_1P_1DAC1'
+	syml	type_con_int,		09000h,	16,	'X_RFBYTE_2P_2DAC1'
+	syml	type_con_int,		09002h,	16,	'X_RFBYTE_2P_1DAC2'
+	syml	type_con_int,		0A000h,	16,	'X_RFBYTE_4P_4DAC1'
+	syml	type_con_int,		0A002h,	16,	'X_RFBYTE_4P_2DAC2'
+	syml	type_con_int,		0A004h,	16,	'X_RFBYTE_4P_1DAC4'
+	syml	type_con_int,		0A006h,	16,	'X_RFBYTE_8P_4DAC2'
+	syml	type_con_int,		0A007h,	16,	'X_RFBYTE_8P_2DAC4'
+	syml	type_con_int,		0A00Eh,	16,	'X_RFBYTE_8P_1DAC8'
+	syml	type_con_int,		0A00Fh,	16,	'X_RFWORD_16P_4DAC4'
+	syml	type_con_int,		0B000h,	16,	'X_RFWORD_16P_2DAC8'
+	syml	type_con_int,		0B001h,	16,	'X_RFLONG_32P_4DAC8'
+
+	syml	type_con_int,		0B002h,	16,	'X_RFBYTE_LUMA8'
+	syml	type_con_int,		0B003h,	16,	'X_RFBYTE_RGBI8'
+	syml	type_con_int,		0B004h,	16,	'X_RFBYTE_RGB8'
+	syml	type_con_int,		0B005h,	16,	'X_RFWORD_RGB16'
+	syml	type_con_int,		0B006h,	16,	'X_RFLONG_RGB24'
+
+	syml	type_con_int,		0C000h,	16,	'X_1P_1DAC1_WFBYTE'
+	syml	type_con_int,		0D000h,	16,	'X_2P_2DAC1_WFBYTE'
+	syml	type_con_int,		0D002h,	16,	'X_2P_1DAC2_WFBYTE'
+	syml	type_con_int,		0E000h,	16,	'X_4P_4DAC1_WFBYTE'
+	syml	type_con_int,		0E002h,	16,	'X_4P_2DAC2_WFBYTE'
+	syml	type_con_int,		0E004h,	16,	'X_4P_1DAC4_WFBYTE'
+	syml	type_con_int,		0E006h,	16,	'X_8P_4DAC2_WFBYTE'
+	syml	type_con_int,		0E007h,	16,	'X_8P_2DAC4_WFBYTE'
+	syml	type_con_int,		0E00Eh,	16,	'X_8P_1DAC8_WFBYTE'
+	syml	type_con_int,		0E00Fh,	16,	'X_16P_4DAC4_WFWORD'
+	syml	type_con_int,		0F000h,	16,	'X_16P_2DAC8_WFWORD'
+	syml	type_con_int,		0F001h,	16,	'X_32P_4DAC8_WFLONG'
+
+	syml	type_con_int,		0F002h,	16,	'X_1ADC8_0P_1DAC8_WFBYTE'
+	syml	type_con_int,		0F003h,	16,	'X_1ADC8_8P_2DAC8_WFWORD'
+	syml	type_con_int,		0F004h,	16,	'X_2ADC8_0P_2DAC8_WFWORD'
+	syml	type_con_int,		0F005h,	16,	'X_2ADC8_16P_4DAC8_WFLONG'
+	syml	type_con_int,		0F006h,	16,	'X_4ADC8_0P_4DAC8_WFLONG'
+
+	syml	type_con_int,		0F007h,	16,	'X_DDS_GOERTZEL_SINC1'
+	syml	type_con_int,		0F087h,	16,	'X_DDS_GOERTZEL_SINC2'
+
+	syml	type_con_int,		0000h,	16,	'X_DACS_OFF'
+	syml	type_con_int,		0100h,	16,	'X_DACS_0_0_0_0'
+	syml	type_con_int,		0200h,	16,	'X_DACS_X_X_0_0'
+	syml	type_con_int,		0300h,	16,	'X_DACS_0_0_X_X'
+	syml	type_con_int,		0400h,	16,	'X_DACS_X_X_X_0'
+	syml	type_con_int,		0500h,	16,	'X_DACS_X_X_0_X'
+	syml	type_con_int,		0600h,	16,	'X_DACS_X_0_X_X'
+	syml	type_con_int,		0700h,	16,	'X_DACS_0_X_X_X'
+	syml	type_con_int,		0800h,	16,	'X_DACS_0N0_0N0'
+	syml	type_con_int,		0900h,	16,	'X_DACS_X_X_0N0'
+	syml	type_con_int,		0A00h,	16,	'X_DACS_0N0_X_X'
+	syml	type_con_int,		0B00h,	16,	'X_DACS_1_0_1_0'
+	syml	type_con_int,		0C00h,	16,	'X_DACS_X_X_1_0'
+	syml	type_con_int,		0D00h,	16,	'X_DACS_1_0_X_X'
+	syml	type_con_int,		0E00h,	16,	'X_DACS_1N1_0N0'
+	syml	type_con_int,		0F00h,	16,	'X_DACS_3_2_1_0'
+
+	syml	type_con_int,		0000h,	16,	'X_PINS_OFF'
+	syml	type_con_int,		0080h,	16,	'X_PINS_ON'
+
+	syml	type_con_int,		0000h,	16,	'X_WRITE_OFF'
+	syml	type_con_int,		0080h,	16,	'X_WRITE_ON'
+
+	syml	type_con_int,		0000h,	16,	'X_ALT_OFF'
+	syml	type_con_int,		0001h,	16,	'X_ALT_ON'
+
+
+	sym	type_con_int,		0,		'INT_OFF'		;event/interrupt constants
+	sym	type_con_int,		0,		'EVENT_INT'
+	sym	type_con_int,		1,		'EVENT_CT1'
+	sym	type_con_int,		2,		'EVENT_CT2'
+	sym	type_con_int,		3,		'EVENT_CT3'
+	sym	type_con_int,		4,		'EVENT_SE1'
+	sym	type_con_int,		5,		'EVENT_SE2'
+	sym	type_con_int,		6,		'EVENT_SE3'
+	sym	type_con_int,		7,		'EVENT_SE4'
+	sym	type_con_int,		8,		'EVENT_PAT'
+	sym	type_con_int,		9,		'EVENT_FBW'
+	sym	type_con_int,		10,		'EVENT_XMT'
+	sym	type_con_int,		11,		'EVENT_XFI'
+	sym	type_con_int,		12,		'EVENT_XRO'
+	sym	type_con_int,		13,		'EVENT_XRL'
+	sym	type_con_int,		14,		'EVENT_ATN'
+	sym	type_con_int,		15,		'EVENT_QMT'
 
 	db	0
 
@@ -18079,7 +19983,35 @@ automatic_symbols:
 level43_symbols:
 
 	sym	type_conlstr,		0,		'LSTRING'
+
 	db	0
+
+
+level44_symbols:
+
+	sym	type_i_flex,		fc_byteswap,	'BYTESWAP'
+	sym	type_i_flex,		fc_bytecomp,	'BYTECOMP'
+	sym	type_i_flex,		fc_wordswap,	'WORDSWAP'
+	sym	type_i_flex,		fc_wordcomp,	'WORDCOMP'
+	sym	type_i_flex,		fc_longswap,	'LONGSWAP'
+	sym	type_i_flex,		fc_longcomp,	'LONGCOMP'
+
+	sym	type_debug_cmd,		00100000b,	'BOOL'
+	sym	type_debug_cmd,		00100010b,	'BOOL_'
+
+	db	0
+
+
+level45_symbols:
+
+	sym	type_struct,		0,		'STRUCT'	;struct definition in CON
+	sym	type_sizeof,		0,		'SIZEOF'	;returns size of structure
+
+	db	0
+
+level46_symbols:
+
+	sym	type_debug_cmd,		dc_c_z_pre,	'C_Z'
 ;
 ;
 ;*********

@@ -1,5 +1,5 @@
 object DebugForm: TDebugForm
-  Left = 5
+  Left = 2
   Top = 2208
   Anchors = []
   AutoScroll = False

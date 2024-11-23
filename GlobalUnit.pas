@@ -89,7 +89,7 @@ type
     DatLengths:         array[0..FileLimit-1] of integer;
     DatData:            array[0..ObjLimit -1] of byte;
 
-    InfoCount:          integer;
+    InfoCount:          integer;        // used by PropellerTool
     InfoStart:          array[0..InfoLimit-1] of integer;
     InfoFinish:         array[0..InfoLimit-1] of integer;
     InfoType:           array[0..InfoLimit-1] of integer;

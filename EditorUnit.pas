@@ -389,7 +389,7 @@ begin
                         (ParamStr(2) = '-cb') or
                         (ParamStr(2) = '-rd') or
                         (ParamStr(2) = '-fd');
-        Compile(cObjOn, cListOff, cDocOff); // aborts if error
+        Compile(cObjOn, cListOn, cDocOff); // aborts if error
       except
         WriteErrorFile(CurrentFilename + ':' + IntToStr(GetErrorLine) + ':error:' + P2.ErrorMsg);
         ExitCode := 1;
@@ -2328,6 +2328,7 @@ begin
   SetDirectories;
   if TopFilename = '' then Level := 2 else Level := 1;
   if Level = 1 then TopFile := TopFilename else TopFile := CurrentFilename;
+  P2.DistilledBytes := 0;                       // reset distilled byte count
   P2.DownloadBaud := DefaultBaud;               // set default download baud
   PWordArray(@P2.DebugData)[0] := $200;         // reset debug data
   for i := 1 to 255 do PWordArray(@P2.DebugData)[i] := 0;
