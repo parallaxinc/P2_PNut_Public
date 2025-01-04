@@ -2757,7 +2757,8 @@ taskspin_	call	#build_stack		'build remote stack with parameters, after: x=task,
 .new		not	y,taskena		'get new task number
 		encod	y
 
-    if_c	mov	x,y			'if push, set top of stack to new task number
+    if_c	not	x,y			'if push, set top of stack to new task number
+    if_c	and	x,#$1F
 
 		mov	w,pb			'save current execution address in w
 

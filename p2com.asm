@@ -13545,7 +13545,7 @@ ct_cogspin_taskspin:
 		call	enter_obj
 
 		or	ecx,ecx			;if result push, set msb of parameter count
-		jnc	@@nopush
+		jns	@@nopush
 		or	bl,80h
 @@nopush:
 		mov	al,bl			;enter parameter count
