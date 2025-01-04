@@ -200,6 +200,7 @@ type
   procedure ComposeRAM(ProgramFlash, DownloadToRAM: boolean);
   procedure ComposeROM;
   procedure LoadObj(Filename: string);
+  procedure LoadBin(Filename: string);
 
   function  NeedToStopDebugFirst: boolean;
   procedure DebugTimerTick(Sender: TObject);
@@ -367,6 +368,34 @@ begin
     RunN3.Visible := True;
     RunComposeRomItem.Visible := True;
   end
+  else if (ParamCount = 2) and (FileExists(ParamStr(1) + '.bin') or FileExists(ParamStr(1))) and
+    ((ParamStr(2) = '-b') or (ParamStr(2) = '-bd')) then
+  begin
+    if FileExists(ParamStr(1) + '.bin') then
+      LoadBin(ExpandFilename(ParamStr(1) + '.bin'))
+    else
+      LoadBin(ExpandFilename(ParamStr(1)));
+    P2.DebugMode := (ParamStr(2) = '-bd');      // establish debug settings
+    P2.DebugBaud := P2.DownloadBaud;
+    P2.DebugLeft := 0;
+    P2.DebugTop := 0;
+    P2.DebugWidth := Screen.Width;
+    P2.DebugHeight := 200;
+    P2.DebugDisplayLeft := 0;
+    P2.DebugDisplayTop := 210;
+    P2.DebugLogSize := 0;
+    try
+      LoadHardware;
+    except
+      WriteErrorFile('serial_error');
+      ExitCode := 1;
+      Close;
+      Exit;
+    end;
+    WriteErrorFile('okay');
+    Close;
+    Exit;
+  end
   else if (ParamCount >= 1) and (FileExists(ParamStr(1) + '.spin2') or FileExists(ParamStr(1))) then
   begin
     if FileExists(ParamStr(1) + '.spin2') then
@@ -422,8 +451,8 @@ begin
     P2.DownloadBaud := DefaultBaud;             // get DebugBaud?
     if (ParamCount >= 3) then
       P2.DownloadBaud := StrToInt(ParamStr(3));
-    P2.DebugBaud := P2.DownloadBaud;
-    P2.DebugLeft := 0;                          // establish other debug settings
+    P2.DebugBaud := P2.DownloadBaud;            // establish other debug settings
+    P2.DebugLeft := 0;
     P2.DebugTop := 0;
     P2.DebugWidth := Screen.Width;
     P2.DebugHeight := 200;
@@ -2388,6 +2417,12 @@ begin
     CompilerError('Object nesting exceeds ' + IntToStr(ObjStackLimit) + ' levels - illegal circular reference may exist');
   // load source file and perform first pass of compilation
   LoadCompilerFile(Filename);
+  P2Compile0;
+  if P2.Error then
+  begin
+    LoadCompilerFile(Filename); //reload file because preprocessor (P2Compile0) modified it
+    CompilerError(P2.ErrorMsg); //aborts
+  end;
   P2Compile1;
   if P2.Error then CompilerError(P2.ErrorMsg); //aborts if error
   if P2.PasmMode and (P2.ObjStackPtr > 1) then CompilerError(Filename + ' is a PASM file and cannot be used as a Spin2 object'); // aborts if error
@@ -2447,6 +2482,13 @@ begin
   end;
   // reload source file and reperform first pass of compilation
   LoadCompilerFile(Filename);
+  P2Compile0;
+  if P2.Error then
+  begin
+    LoadCompilerFile(Filename); //reload file because preprocessor (P2Compile0) modified it
+    CompilerError(P2.ErrorMsg); //aborts
+  end;
+  if p2.PreprocessorUsed then SaveFile(ChangeFileExt(Filename,'') + '_pre.spin2', Edit, EditLength);     // save post-preprocessor file
   P2Compile1;
   if P2.Error then CompilerError(P2.ErrorMsg); //aborts if error
   // load sub-objects' .obj files
@@ -2608,6 +2650,20 @@ begin
     Size := Smaller(FileSize(f), ObjLimit);
     BlockRead(f, P2.Obj, Size);
     if Size < ObjLimit then for i := Size to ObjLimit-1 do P2.Obj[i] := 0;
+  finally
+    CloseFile(f);
+  end;
+end;
+
+procedure TEditorForm.LoadBin(Filename: string);
+var
+  f: file;
+begin
+  AssignFile(f, Filename);
+  try
+    Reset(f, 1);
+    P2.ObjLength := Smaller(FileSize(f), ObjLimit);
+    BlockRead(f, P2.Obj, P2.ObjLength);
   finally
     CloseFile(f);
   end;

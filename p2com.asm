@@ -1,14 +1,15 @@
+; allow IF_C, etc before PASM DEBUG by assembling IF_C SKIP #1 instruction in front of the BRK instrution
 ; ADDPINS/ADDBITS only allowed in PASM under #immediate expression
 ; Allow INA/INB/etc to be used in CON expressions as register values
 
 
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v46		*
+;*	       Spin2 Compiler v47		*
 ;*						*
 ;*	     Written by Chip Gracey		*
-;*	 (C) 2006-2023 by Parallax, Inc.	*
-;*	    Last Updated: 2024/11/20		*
+;*	 (C) 2006-2024 by Parallax, Inc.	*
+;*	    Last Updated: 2024/12/09		*
 ;*						*
 ;************************************************
 ;
@@ -24,6 +25,7 @@
 ; Public routines
 ;
 			public	P2InitStruct
+			public	P2Compile0
 			public	P2Compile1
 			public	P2Compile2
 			public	P2InsertInterpreter
@@ -37,7 +39,7 @@
 ;
 ; Equates
 ;
-spin2_version		=	46
+spin2_version		=	47
 
 obj_limit		=	100000h		;must be same in delphi
 file_limit		=	32		;must be same in delphi
@@ -50,6 +52,7 @@ debug_display_limit	=	1100		;must be same in delphi
 ddsymbols_limit_auto	=	1000h
 ddsymbols_limit_name	=	1000h
 
+symbols_limit_pre	=	1000h
 symbols_limit_auto	=	10000h		;adjust as needed to accommodate auto symbols
 symbols_limit_level	=	400h		;adjust as needed to accommodate level symbols
 symbols_limit_param	=	400h
@@ -77,6 +80,7 @@ objs_limit		=	1024
 distiller_limit		=	10000h
 
 inline_limit		=	120h
+taskhlt_reg		=	1CCh
 mrecv_reg		=	1D2h
 msend_reg		=	1D3h
 pasm_regs		=	1D8h
@@ -643,6 +647,9 @@ asmcode		ac_debug,	000110110b,00b,operand_debug	;	DEBUG()
 ; Types
 ;
 count0		type_undefined		;	(undefined symbol, must be 0)
+count		type_pre_command	;	preprocessor commands DEFINE/UNDEF/IFDEF/IFNDEF/ELSEIFDEF/ELSEIFNDEF/ELSE/ENDIF
+count		type_pre_symbol_ext	;	preprocessor external symbols from command line
+count		type_pre_symbol_int	;	preprocessor internal symbols
 count		type_left		;	(
 count		type_right		;	)
 count		type_leftb		;	[
@@ -705,6 +712,7 @@ count		type_i_return		;	RETURN
 count		type_i_abort		;	ABORT
 count		type_i_look		;	LOOKUPZ, LOOKUP, LOOKDOWNZ, LOOKDOWN
 count		type_i_cogspin		;	COGSPIN
+count		type_i_taskspin		;	TASKSPIN
 count		type_i_flex		;	HUBSET, COGINIT, COGSTOP...
 count		type_recv		;	RECV
 count		type_send		;	SEND
@@ -845,8 +853,8 @@ count		bc_akpin
 count		bc_rdpin
 count		bc_rqpin
 
-count		bc_unused_3F
-count		bc_unused_40
+count		bc_tasknext
+count		bc_unused
 
 count		bc_debug
 
@@ -1149,6 +1157,12 @@ count2		bc_pinread			;hub bytecodes, miscellaneous
 count2		bc_pinwrite
 count2		bc_pinstart
 count2		bc_pinclear
+count2		bc_taskspin
+count2		bc_taskstop
+count2		bc_taskhalt
+count2		bc_taskcont
+count2		bc_taskchk
+count2		bc_taskid
 ;
 ;
 ; Flex codes
@@ -1244,6 +1258,13 @@ flexcode	fc_nan,		bc_nan,		1,	1,	0,	1
 flexcode	fc_round,	bc_round,	1,	1,	0,	1
 flexcode	fc_trunc,	bc_trunc,	1,	1,	0,	1
 flexcode	fc_float,	bc_float,	1,	1,	0,	1
+
+flexcode	fc_tasknext,	bc_tasknext,	0,	0,	0,	0
+flexcode	fc_taskstop,	bc_taskstop,	1,	0,	0,	1
+flexcode	fc_taskhalt,	bc_taskhalt,	1,	0,	0,	1
+flexcode	fc_taskcont,	bc_taskcont,	1,	0,	0,	1
+flexcode	fc_taskchk,	bc_taskchk,	1,	1,	0,	1
+flexcode	fc_taskid,	bc_taskid,	0,	1,	0,	1
 ;
 ;
 ; Operators
@@ -1556,8 +1577,9 @@ symbol		dd	count dup (?)
 dbx		error						;error boolean
 ddx		error_msg					;error message pointer
 
-dbx		pasm_mode					;pasm mode
 dbx		debug_mode					;debug mode
+dbx		preprocessor_used				;preprocessor used
+dbx		pasm_mode					;pasm mode
 
 ddx		source						;source pointer
 ddx		source_start					;source error start
@@ -1649,6 +1671,29 @@ ddx		size_obj					;size of object
 ddx		size_var					;size of var
 
 ddx		obj_stack_ptr					;recursion level
+;
+;
+;************************************************************************
+;*  procedure P2Compile0;						*
+;************************************************************************
+;
+		proc	P2Compile0
+
+		cld
+		push	ebx
+		push	esi
+		push	edi
+		push	ebp
+
+		call	_compile0
+
+		pop	ebp
+		pop	edi
+		pop	esi
+		pop	ebx
+		ret
+
+		endp	P2Compile0
 ;
 ;
 ;************************************************************************
@@ -2033,11 +2078,20 @@ error_eamoov:	call	set_error
 error_eaocom:	call	set_error
 		db	'Expected an object constant or method',0
 
+error_eas:	call	set_error
+		db	'Expected a symbol',0
+
 error_easmn:	call	set_error
 		db	'Expected a structure member name',0
 
+error_easn:	call	set_error
+		db	'Expected a structure name',0
+
 error_eassign:	call	set_error
 		db	'Expected ":="',0
+
+error_eastott:	call	set_error
+		db	'Expected ":=", ":=:", "~", or "~~"',0
 
 error_easvmoo:	call	set_error
 		db	'Expected a string, variable, method, or object',0
@@ -2045,14 +2099,14 @@ error_easvmoo:	call	set_error
 error_eatq:	call	set_error
 		db	'Expected a terminating quote',0
 
-error_eauon:	call	set_error
-		db	'Expected a unique object name',0
-
-error_eav:	call	set_error
-		db	'Expected a variable',0
-
 error_eaucnpos:	call	set_error
 		db	'Expected a unique constant name, "#", or STRUCT',0
+
+error_eaumn:	call	set_error
+		db	'Expected a unique method name',0
+
+error_eauon:	call	set_error
+		db	'Expected a unique object name',0
 
 error_eaunbwlo:	call	set_error
 		db	'Expected a unique name, "BYTE", "WORD", "LONG", or assembly instruction',0
@@ -2063,18 +2117,6 @@ error_eaupn:	call	set_error
 error_eaurn:	call	set_error
 		db	'Expected a unique result name',0
 
-error_eas:	call	set_error
-		db	'Expected a symbol',0
-
-error_easn:	call	set_error
-		db	'Expected a structure name',0
-
-error_eastott:	call	set_error
-		db	'Expected ":=", ":=:", "~", or "~~"',0
-
-error_eaumn:	call	set_error
-		db	'Expected a unique method name',0
-
 error_eausn:	call	set_error
 		db	'Expected a unique STRUCT name',0
 
@@ -2083,6 +2125,9 @@ error_eauvn:	call	set_error
 
 error_eauvnsa:	call	set_error
 		db	'Expected a unique variable name, STRUCT name, "BYTE", "WORD", "LONG", "^", "ALIGNW", or "ALIGNL"',0
+
+error_eav:	call	set_error
+		db	'Expected a variable',0
 
 error_ebackcmd:	call	set_error
 		db	'Expected "?", ".", "(", "$", "%", "#", or DEBUG command',0
@@ -2577,6 +2622,17 @@ ddx		esp_save			;stack pointer for abort
 ;			byte	checksum
 ;			byte	'PUBn', 0..15 results, parameters	;PUB names and parameters
 ;			byte	'CONn', 16/17 int/float, long value	;CON names and values
+; Compile0
+;
+_compile0:	mov	[error],1		;init error to true
+		mov	[esp_save],esp		;save esp in case of error
+
+		call	enter_symbols_pre	;enter preprocessor symbols
+		call	preprocessor		;run preprocessor, only preprocessor symbols will be searched
+		call	reset_symbols_pre	;reset preprocessor symbols
+
+		jmp	compile_done		;exit
+;
 ;
 ; Compile1
 ;
@@ -3181,6 +3237,207 @@ ddx		inf_data0
 ddx		inf_data1
 ddx		inf_data2
 ddx		inf_data3
+;
+;
+;******************
+;*  Preprocessor  *
+;******************
+;
+; Preprocessor commands
+;
+pre_define	=	00000001b		;#DEFINE symbol
+pre_undef	=	00000010b		;#UNDEF symbol
+pre_ifdef	=	00000100b		;#IFDEF symbol
+pre_ifndef	=	00001000b		;#IFNDEF symbol
+pre_elseifdef	=	00010000b		;#ELSEIFDEF symbol
+pre_elseifndef	=	00100000b		;#ELSEIFNDEF symbol
+pre_else	=	01000000b		;#ELSE
+pre_endif	=	10000000b		;#ENDIF
+
+
+preprocessor:	mov	[preprocessor_used],0	;clear preprocessor-used flag
+		call	reset_element		;point to start of source code
+		xor	edx,edx			;reset preprocessor stack (8 nibbles/levels)
+
+@@checkline:	call	get_element		;get element at start of line
+		jc	@@done			;if eof, done
+		cmp	al,type_pound		;if not '#', check if eol
+		jne	@@checkeol
+		mov	esi,[source_start]	;got '#', remember start of '#'
+		call	get_element		;get element after '#'
+		cmp	al,type_pre_command	;got preprocessor command?
+		je	@@command
+@@checkeol:	cmp	al,type_end		;if eol, check next line
+		je	@@checkline
+		call	get_element		;scan to eol
+		jmp	@@checkeol
+
+@@done:		test	dl,0Fh			;eof, error if open IFDEF/IFNDEF block
+		jnz	error_eendif
+		ret				;done
+
+
+@@command:	mov	[preprocessor_used],1	;set preprocessor-used flag
+		mov	[source_start],esi	;set source start to '#' in case error
+
+		test	edx,0F0000000h		;if stack full, error if IFDEF/IFNDEF
+		jz	@@notfull
+		test	bl,pre_ifdef or pre_ifndef
+		jnz	error_loxniie
+@@notfull:
+		test	dl,0Fh			;if unscoped, error if ELSEIFDEF/ELSEIFNDEF/ELSE/ENDIF
+		jnz	@@inscope
+		test	bl,pre_elseifdef or pre_elseifndef or pre_else or pre_endif
+		jnz	error_mbpbi
+@@inscope:
+		test	dl,@@elsef		;if ELSE flag, error if ELSEIFDEF/ELSEIFNDEF/ELSE
+		jz	@@notelse
+		test	bl,pre_elseifdef or pre_elseifndef or pre_else
+		jnz	error_eendif
+@@notelse:
+		mov	cl,dl			;get state before command
+
+		cmp	bl,pre_define		;handle command
+		je	@@define
+		cmp	bl,pre_undef
+		je	@@undef			;c=0
+		cmp	bl,pre_ifdef
+		je	@@ifdef			;c=0
+		cmp	bl,pre_ifndef
+		je	@@ifndef
+		cmp	bl,pre_elseifdef
+		je	@@elseifdef		;c=0
+		cmp	bl,pre_elseifndef
+		je	@@elseifndef
+		cmp	bl,pre_else
+		je	@@else
+		jmp	@@endif
+
+@@define:	stc				;DEFINE symbol
+@@undef:	pushf				;UNDEF symbol (c=0)
+		call	@@testsymbol		;test symbol
+		popf
+		mov	ah,0
+		adc	ah,0			;ah=1 if DEFINE, ah=0 if UNDEF
+
+		test	dl,@@inactivef		;if inactive, ignore
+		jnz	@@getend
+
+		cmp	al,type_pre_symbol_ext	;if external symbol, don't affect it
+		je	@@getend
+
+		cmp	al,type_pre_symbol_int	;if internal symbol, set it to 0 or 1
+		jne	@@notint
+		mov	ebx,[symbol_exists_ptr]
+		mov	[ebx-1-4],ah
+		jmp	@@getend
+@@notint:
+		call	backup_symbol		;undefined, enter new internal symbol
+		mov	al,type_pre_symbol_int
+		movzx	ebx,ah
+		call	enter_symbol2
+		jmp	@@getend
+
+@@ifndef:	stc				;IFNDEF symbol
+@@ifdef:	call	@@testsymbol		;IFDEF symbol (c=0)
+		shl	edx,4			;push outer state
+		or	dl,[@@ifdef_+ebx]	;get new state
+		jmp	@@getend
+
+@@elseifndef:	stc				;ELSEIFNDEF symbol
+@@elseifdef:	call	@@testsymbol		;ELSEIFDEF symbol (c=0)
+		and	dl,0F0h			;update current state
+		or	dl,[@@elseifdef_+ebx-2]
+		jmp	@@getend
+
+@@else:		mov	bl,dl			;ELSE
+		and	ebx,0110b		;update current state
+		shr	ebx,1
+		and	dl,0F0h
+		or	dl,[@@else_+ebx-1]
+		jmp	@@getend
+
+@@endif:	shr	edx,4			;ENDIF, pop outer state
+
+@@getend:	call	get_end			;get end of line
+
+		xor	cl,dl			;active/inactive change?
+		test	cl,@@inactivef
+		jz	@@same
+		test	dl,@@inactivef		;yes, which direction?
+		jz	@@nowactive
+		mov	edi,[source_ptr]	;active to inactive, remember start of inactive source
+		jmp	@@same
+@@nowactive:	mov	esi,edi			;inactive to active, clear from start of inactive source
+@@same:
+		mov	ecx,[source_start]	;clear inactive code and/or command from source
+		sub	ecx,esi
+		add	esi,[source]
+@@clear:	lodsb				;get source character
+		cmp	al,9			;tab?
+		je	@@keep
+		cmp	al,13			;eol?
+		je	@@keep
+		mov	[byte esi-1],' '	;else, change to space to clear source
+@@keep:		loop	@@clear
+		jmp	@@checkline
+
+
+@@testsymbol:	pushf				;c=0 for IFDEF/ELSEIFDEF, c=1 for IFNDEF/ELSEIFNDEF
+		call	get_element		;get symbol
+		cmp	al,type_pre_symbol_ext	;external preprocessor symbol?
+		je	@@testsymbol2
+		cmp	al,type_pre_symbol_int	;internal preprocessor symbol?
+		je	@@testsymbol2
+		cmp	al,type_undefined	;if not undefined, error, else value = 0
+		jne	error_eapps
+@@testsymbol2:	popf
+		adc	bl,0			;toggle 0/1 value if IFNDEF/ELSEIFNDEF
+		and	bl,1
+		or	bl,dl			;get current state with 0/1 in lsb
+		and	ebx,0111b
+		ret				;al=type, ebx=offset into lookup table
+
+
+@@planned	=	0010b			;preprocessor states
+@@active	=	0100b
+@@completed	=	0110b
+
+@@elsef		=	1000b			;ELSE flag
+@@inactivef	=	0010b			;inactive flag
+
+@@ifdef_	db	@@planned		;unscoped  + false	--> planned
+		db	@@active		;unscoped  + true	--> active
+		db	@@completed		;planned   + false	--> completed
+		db	@@completed		;planned   + true	--> completed
+		db	@@planned		;active    + false	--> planned
+		db	@@active		;active    + true	--> active
+		db	@@completed		;completed + false	--> completed
+		db	@@completed		;completed + true	--> completed
+
+@@elseifdef_	db	@@planned		;planned   + false	--> planned
+		db	@@active		;planned   + true	--> active
+		db	@@completed		;active    + false	--> completed
+		db	@@completed		;active    + true	--> completed
+		db	@@completed		;completed + false	--> completed
+		db	@@completed		;completed + true	--> completed
+
+@@else_		db	@@elsef or @@active	;planned		--> active
+		db	@@elsef or @@completed	;active			--> completed
+		db	@@elsef or @@completed	;completed		--> completed
+
+
+error_eendif:	call	set_error
+		db	'Expected #ENDIF',0
+
+error_loxniie:	call	set_error
+		db	'Limit of 8 nested #IFDEF/#IFNDEFs exceeded',0
+
+error_mbpbi:	call	set_error
+		db	'Must be preceeded by #IFDEF or #IFNDEF',0
+
+error_eapps:	call	set_error
+		db	'Expected a preprocessor symbol',0
 ;
 ;
 ;************************************************************************
@@ -6646,9 +6903,9 @@ insert_interpreter:
 @@var_longs	=	3Ch
 @@clkmode_hub	=	40h
 @@clkfreq_hub	=	44h
-@@_debugnop1_	=	0EDCh
-@@_debugnop2_	=	0EE0h
-@@_debugnop3_	=	0EE4h
+@@_debugnop1_	=	0F20h
+@@_debugnop2_	=	0F24h
+@@_debugnop3_	=	0F28h
 
 interpreter:	include	"Spin2_interpreter.inc"
 interpreter_end:
@@ -8703,9 +8960,11 @@ get_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		cmp	al,type_pound		;check for #register
 		jne	@@spin2notreg
 		call	get_element
-		cmp	al,type_dat_long_res	;must be type_dat_long_res
+		cmp	al,type_register	;type_register?
+		je	@@spin2con
+		cmp	al,type_dat_long_res	;type_dat_long_res?
 		je	@@gotres
-		cmp	al,type_dat_byte	;..or type_dat_byte..type_dat_long
+		cmp	al,type_dat_byte	;type_dat_byte..type_dat_long?
 		jb	@@spin2regerr
 		cmp	al,type_dat_long
 		ja	@@spin2regerr
@@ -11057,18 +11316,22 @@ compile_instruction:
 		cmp	al,type_method		;method({param,...})?
 		je	ct_method
 
-		cmp	al,type_i_next_quit	;instruction 'NEXT'/'QUIT' ?
+		cmp	al,type_i_next_quit	;instruction NEXT/QUIT ?
 		je	ci_next_quit
 
-		cmp	al,type_i_return	;instruction 'RETURN' ?
+		cmp	al,type_i_return	;instruction RETURN ?
 		je	ci_return
 
-		cmp	al,type_i_abort		;instruction 'ABORT' ?
+		cmp	al,type_i_abort		;instruction ABORT ?
 		je	ci_abort
 
-		cmp	al,type_i_cogspin	;instruction 'COGSPIN' ?
+		cmp	al,type_i_cogspin	;instruction COGSPIN ?
 		mov	cl,bc_coginit
-		je	ct_cogspin
+		je	ct_cogspin_taskspin
+
+		cmp	al,type_i_taskspin	;instruction TASKSPIN ?
+		mov	cl,bc_taskspin
+		je	ct_cogspin_taskspin	;(c=0 for no push)
 
 		cmp	al,type_debug		;DEBUG?
 		je	ci_debug
@@ -12677,7 +12940,12 @@ compile_term:	cmp	al,type_con_int		;constant integer?
 
 		cmp	al,type_i_cogspin	;instruction COGSPIN ?
 		mov	cl,bc_coginit_push
-		je	ct_cogspin
+		je	ct_cogspin_taskspin
+
+		cmp	al,type_i_taskspin	;instruction TASKSPIN ?
+		mov	cl,bc_taskspin
+		stc				;(c=1 for push)
+		je	ct_cogspin_taskspin
 
 		cmp	al,type_i_flex		;flex instruction?
 		jne	@@notflex
@@ -13187,13 +13455,22 @@ ct_look:	mov	cl,bl			;save 'lookup'/'lookdown' and 0/1 flags
 ;
 ;
 ; Compile term - COGSPIN(cog,method(parameters),stackadr)
+;   on entry: cl = bc_coginit / bc_coginit_push
 ;
-ct_cogspin:	push	ecx			;push bc_coginit/bc_coginit_push
+; Compile term - TASKSPIN(task,method(parameters),stackadr)
+;   on entry: cl = bc_taskspin, c=1 for result push
+;
+ct_cogspin_taskspin:
+
+		pushf				;push bc_coginit / bc_coginit_push / bc_taskspin (c=push)
+		shl	ecx,1
+		popf
+		rcr	ecx,1			;save c into ecx msb
+		push	ecx
 
 		call	get_left		;get '('
 
-		call	compile_exp		;compile cog exp
-
+		call	compile_exp		;compile cog or task exp
 		call	get_comma		;get ','
 
 		call	get_element		;get method/obj/var
@@ -13244,15 +13521,34 @@ ct_cogspin:	push	ecx			;push bc_coginit/bc_coginit_push
 
 		call	get_right		;get ')'
 
-		mov	al,bc_hub_bytecode	;enter COGSPIN bytecodes
-		call	enter_obj
-		mov	al,bc_cogspin
+		mov	al,bc_hub_bytecode	;enter bc_hub_bytecode before bc_cogspin / bc_taskspin
 		call	enter_obj
 
-		pop	eax			;pop and enter parameter count
+		pop	ebx			;pop parameter count
+		pop	ecx			;pop bc_coginit / bc_coginit_push / bc_taskspin (msb=push)
+
+		cmp	cl,bc_taskspin		;COGSPIN or TASKSPIN ?
+		je	@@taskspin2
+
+
+		mov	al,bc_cogspin		;COGSPIN, enter bc_cogspin
 		call	enter_obj
 
-		pop	eax			;pop and enter bc_coginit/bc_coginit_push
+		mov	al,bl			;enter parameter count
+		call	enter_obj
+
+		mov	al,cl			;enter bc_coginit / bc_coginit_push
+		jmp	enter_obj
+
+
+@@taskspin2:	mov	al,cl			;TASKSPIN, enter bc_taskspin
+		call	enter_obj
+
+		or	ecx,ecx			;if result push, set msb of parameter count
+		jnc	@@nopush
+		or	bl,80h
+@@nopush:
+		mov	al,bl			;enter parameter count
 		jmp	enter_obj
 ;
 ;
@@ -17850,13 +18146,11 @@ debug_symbols:
 ;
 ; Variables
 ;
-ddx		ddsymbols_hash_auto,1000h	;auto symbols
+ddx		ddsymbols_auto_hash,1000h	;auto symbols
 dbx		ddsymbols_auto,ddsymbols_limit_auto
-ddx		ddsymbols_ptr_auto
 
-ddx		ddsymbols_hash_name,1000h	;name symbols
+ddx		ddsymbols_name_hash,1000h	;name symbols
 dbx		ddsymbols_name,ddsymbols_limit_name
-ddx		ddsymbols_ptr_name
 
 ddx		dd_sym_start
 dbx		dd_sym_size
@@ -17873,22 +18167,22 @@ ddx		debug_display_ptr
 ;
 reset_debug_symbols:
 
-		mov	edi,offset ddsymbols_hash_auto		;reset debug symbols
+		mov	edi,offset ddsymbols_auto_hash		;reset debug symbols
 		call	reset_hash_table
 
-		mov	[symbol_ptr],		offset ddsymbols_auto	;write auto symbols
+		mov	[symbol_ptr_hash],	offset ddsymbols_auto_hash	;write auto symbols
+		mov	[symbol_ptr],		offset ddsymbols_auto
 		mov	[symbol_ptr_limit],	offset ddsymbols_auto + ddsymbols_limit_auto - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset ddsymbols_hash_auto
 
 		lea	esi,[debug_symbols]			;enter debug symbols
 		call	enter_symbols
 
-		mov	edi,offset ddsymbols_hash_name		;reset name symbols
+		mov	edi,offset ddsymbols_name_hash		;reset name symbols
 		call	reset_hash_table
 
-		mov	[symbol_ptr],		offset ddsymbols_name	;write name symbols
+		mov	[symbol_ptr_hash],	offset ddsymbols_name_hash	;write name symbols
+		mov	[symbol_ptr],		offset ddsymbols_name
 		mov	[symbol_ptr_limit],	offset ddsymbols_name + ddsymbols_limit_name - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset ddsymbols_hash_name
 
 		ret
 ;
@@ -18230,11 +18524,11 @@ find_dd_symbol:	push	ecx
 		lea	esi,[symbol]		;hash symbol, ecx=length, edx=hash index
 		call	hash_symbol
 
-		mov	ebx,offset ddsymbols_hash_auto		;search debug display auto symbols
+		mov	ebx,offset ddsymbols_auto_hash		;search debug display auto symbols
 		call	check_symbol
 		jnc	@@found
 
-		mov	ebx,offset ddsymbols_hash_name		;search debug display name symbols
+		mov	ebx,offset ddsymbols_name_hash		;search debug display name symbols
 		call	check_symbol
 		jnc	@@found
 
@@ -18292,39 +18586,49 @@ enter_dd_record:
 ;
 ; Variables
 ;
-ddx		symbol_ptr			;these three must be set to the current symbol set
+ddx		symbol_ptr_hash				;these three must be set to the current symbol set
+ddx		symbol_ptr
 ddx		symbol_ptr_limit
-ddx		symbol_hash_ptr
 
-ddx		symbols_hash_auto,1000h		;auto symbols
+ddx		symbols_pre_hash,1000h			;preprocessor symbols
+dbx		symbols_pre,symbols_limit_pre
+
+ddx		symbols_auto_hash,1000h			;auto symbols
 dbx		symbols_auto,symbols_limit_auto
-ddx		symbols_ptr_auto
 
-ddx		symbols_hash_level,1000h	;spin2 level symbols
+ddx		symbols_level_hash,1000h		;spin2 level symbols
 dbx		symbols_level,symbols_limit_level
-ddx		symbols_ptr_level
 
-ddx		symbols_hash_param,1000h	;parameter symbols
+ddx		symbols_param_hash,1000h		;parameter symbols
 dbx		symbols_param,symbols_limit_param
-ddx		symbols_ptr_param
 
-ddx		symbols_hash_main,1000h		;main symbols
+ddx		symbols_main_hash,1000h			;main symbols
 dbx		symbols_main,symbols_limit_main
-ddx		symbols_ptr_main
 
-ddx		symbols_hash_local,1000h	;local symbols
+ddx		symbols_local_hash,1000h		;local symbols
 dbx		symbols_local,symbols_limit_local
-ddx		symbols_ptr_local
 
-ddx		symbols_hash_inline,1000h	;inline symbols
+ddx		symbols_inline_hash,1000h		;inline symbols
 dbx		symbols_inline,symbols_limit_inline
-ddx		symbols_ptr_inline
 
-dbx		symbol_exists			;symbol-exists flag and ptr
+dbx		symbol_exists				;symbol-exists flag and ptr
 ddx		symbol_exists_ptr
 
-dbx		symbol,symbol_limit+2		;+2 for obj.method extra byte and 0
+dbx		symbol,symbol_limit+2			;+2 for obj.method extra byte and 0
 dbx		symbol2,symbol_limit+2
+;
+;
+; Enter preprocessor symbols into hashed symbol table
+;
+enter_symbols_pre:
+
+		call	reset_symbols_pre
+		call	write_symbols_pre
+		lea	esi,[preprocessor_symbols]
+		cmp	[debug_mode],0			;add '__DEBUG__'?
+		je	@@enter
+		lea	esi,[preprocessor_symbols_debug]
+@@enter:	jmp	enter_symbols
 ;
 ;
 ; Enter auto symbols into hashed symbol table
@@ -18334,20 +18638,7 @@ enter_symbols_auto:
 		call	reset_symbols_auto
 		call	write_symbols_auto
 		lea	esi,[automatic_symbols]
-
-enter_symbols:	call	hash_symbol		;hash symbol name to get length
-
-		lea	edi,[symbol2]		;copy symbol name to symbol2
-	rep	movsb
-		lodsd				;get value
-		mov	ebx,eax
-		lodsb				;get type
-		call	enter_symbol2		;enter symbol
-
-		cmp	[byte esi],0		;end of automatic symbols?
-		jne	enter_symbols
-
-		ret
+		jmp	enter_symbols
 ;
 ;
 ; Discover Spin2 level and enter associated symbols
@@ -18382,6 +18673,28 @@ enter_symbols_level:
 		lea	esi,[level46_symbols]
 		call	enter_symbols
 @@not46:
+		cmp	[spin2_level],47
+		jb	@@not47
+		lea	esi,[level47_symbols]
+		call	enter_symbols
+@@not47:
+		ret
+;
+;
+; Enter symbols into hashed symbol table
+;
+enter_symbols:	call	hash_symbol		;hash symbol name to get length
+
+		lea	edi,[symbol2]		;copy symbol name to symbol2
+	rep	movsb
+		lodsd				;get value
+		mov	ebx,eax
+		lodsb				;get type
+		call	enter_symbol2		;enter symbol
+
+		cmp	[byte esi],0		;end of automatic symbols?
+		jne	enter_symbols
+
 		ret
 ;
 ;
@@ -18413,88 +18726,100 @@ enter_symbols_param:
 @@done:		ret
 ;
 ;
-; Reset auto/main/local/inline symbols
+; Resets for symbol tables
 ;
+reset_symbols_pre:
+
+		mov	edi,offset symbols_pre_hash
+		jmp	reset_hash_table
+
 reset_symbols_auto:
 
-		mov	edi,offset symbols_hash_auto
+		mov	edi,offset symbols_auto_hash
 		jmp	reset_hash_table
 
 reset_symbols_level:
 
-		mov	edi,offset symbols_hash_level
+		mov	edi,offset symbols_level_hash
 		jmp	reset_hash_table
 
 reset_symbols_param:
 
-		mov	edi,offset symbols_hash_param
+		mov	edi,offset symbols_param_hash
 		jmp	reset_hash_table
 
 reset_symbols_main:
 
-		mov	edi,offset symbols_hash_main
+		mov	edi,offset symbols_main_hash
 		jmp	reset_hash_table
 
 reset_symbols_local:
 
-		mov	edi,offset symbols_hash_local
+		mov	edi,offset symbols_local_hash
 		jmp	reset_hash_table
 
 reset_symbols_inline:
 
-		mov	edi,offset symbols_hash_inline
+		mov	edi,offset symbols_inline_hash
 
 reset_hash_table:
 
 		xor	eax,eax
 		mov	ecx,1000h
-		rep	stosd
+	rep	stosd
 
 		ret
 ;
 ;
-; Write auto/main/local/inline symbols
+; Write-setups for symbol tables
 ;
+write_symbols_pre:
+
+		mov	[symbol_ptr_hash],	offset symbols_pre_hash
+		mov	[symbol_ptr],		offset symbols_pre
+		mov	[symbol_ptr_limit],	offset symbols_pre + symbols_limit_pre - (1+32+1+4+1+4)
+		ret
+
 write_symbols_auto:
 
+		mov	[symbol_ptr_hash],	offset symbols_auto_hash
 		mov	[symbol_ptr],		offset symbols_auto
 		mov	[symbol_ptr_limit],	offset symbols_auto + symbols_limit_auto - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_auto
 		ret
 
 write_symbols_level:
 
+		mov	[symbol_ptr_hash],	offset symbols_level_hash
 		mov	[symbol_ptr],		offset symbols_level
 		mov	[symbol_ptr_limit],	offset symbols_level + symbols_limit_level - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_level
 		ret
 
 write_symbols_param:
 
+		mov	[symbol_ptr_hash],	offset symbols_param_hash
 		mov	[symbol_ptr],		offset symbols_param
 		mov	[symbol_ptr_limit],	offset symbols_param + symbols_limit_param - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_param
 		ret
 
 write_symbols_main:
 
+		mov	[symbol_ptr_hash],	offset symbols_main_hash
 		mov	[symbol_ptr],		offset symbols_main
 		mov	[symbol_ptr_limit],	offset symbols_main + symbols_limit_main - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_main
 		ret
 
 write_symbols_local:
 
+		mov	[symbol_ptr_hash],	offset symbols_local_hash
 		mov	[symbol_ptr],		offset symbols_local
 		mov	[symbol_ptr_limit],	offset symbols_local + symbols_limit_local - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_local
 		ret
 
 write_symbols_inline:
 
+		mov	[symbol_ptr_hash],	offset symbols_inline_hash
 		mov	[symbol_ptr],		offset symbols_inline
 		mov	[symbol_ptr_limit],	offset symbols_inline + symbols_limit_inline - (1+32+1+4+1+4)
-		mov	[symbol_hash_ptr],	offset symbols_hash_inline
 		ret
 ;
 ;
@@ -18517,7 +18842,7 @@ enter_symbol2:	push	eax
 
 		lea	esi,[symbol2]		;hash symbol2 name to get length and hash index
 		call	hash_symbol
-		add	edx,[symbol_hash_ptr]	;get hash table pointer
+		add	edx,[symbol_ptr_hash]	;get pointer to hash table
 		jmp	@@check			;append new record
 
 @@skip:		mov	edx,eax			;point to next record
@@ -18562,7 +18887,7 @@ find_param:	push	ecx
 		lea	esi,[symbol]		;hash symbol, ecx=length, edx=hash index
 		call	hash_symbol
 
-		mov	ebx,offset symbols_hash_param		;search param symbols
+		mov	ebx,offset symbols_param_hash		;search param symbols
 		call	check_symbol
 		jnc	@@found
 
@@ -18576,7 +18901,7 @@ find_param:	push	ecx
 		ret
 ;
 ;
-; Find symbol in auto/level/main/local/inline symbol table
+; Find symbol in symbol tables
 ; symbol must hold name, terminated with 0
 ; if found, eax=type and ebx=value
 ; if not found, eax=0 (type_undefined) and ebx=0
@@ -18589,27 +18914,34 @@ find_symbol:	push	ecx
 		lea	esi,[symbol]		;hash symbol, ecx=length, edx=hash index
 		call	hash_symbol
 
-		mov	ebx,offset symbols_hash_auto		;search auto symbols
+		mov	ebx,offset symbols_pre_hash		;search only preprocessor symbols?
+		cmp	ebx,[symbol_ptr_hash]
+		jne	@@notpre
+		call	check_symbol
+		jnc	@@found
+		jmp	@@notfound
+@@notpre:
+		mov	ebx,offset symbols_auto_hash		;search auto symbols
 		call	check_symbol
 		jnc	@@found
 
-		mov	ebx,offset symbols_hash_level		;search spin2 level symbols
+		mov	ebx,offset symbols_level_hash		;search spin2 level symbols
 		call	check_symbol
 		jnc	@@found
 
-		mov	ebx,offset symbols_hash_main		;search main symbols
+		mov	ebx,offset symbols_main_hash		;search main symbols
 		call	check_symbol
 		jnc	@@found
 
-		mov	ebx,offset symbols_hash_local		;search local symbols
+		mov	ebx,offset symbols_local_hash		;search local symbols
 		call	check_symbol
 		jnc	@@found
 
-		mov	ebx,offset symbols_hash_inline		;search inline symbols
+		mov	ebx,offset symbols_inline_hash		;search inline symbols
 		call	check_symbol
 		jnc	@@found
 
-		xor	eax,eax			;symbol not found
+@@notfound:	xor	eax,eax			;symbol not found
 		xor	ebx,ebx
 
 @@found:	pop	edi
@@ -18834,6 +19166,26 @@ find_symbol_s1:	syms	'(',	type_left,	0
 		syms	'?',	type_op,	oc_ternary
 
 		ret
+;
+;
+; Preprocessor symbols
+;
+preprocessor_symbols_debug:
+
+	sym	type_pre_symbol_ext,	1,		'__DEBUG__'
+
+preprocessor_symbols:
+
+	sym	type_pre_command,	pre_define,	'DEFINE'
+	sym	type_pre_command,	pre_undef,	'UNDEF'
+	sym	type_pre_command,	pre_ifdef,	'IFDEF'
+	sym	type_pre_command,	pre_ifndef,	'IFNDEF'
+	sym	type_pre_command,	pre_elseifdef,	'ELSEIFDEF'
+	sym	type_pre_command,	pre_elseifndef,	'ELSEIFNDEF'
+	sym	type_pre_command,	pre_else,	'ELSE'
+	sym	type_pre_command,	pre_endif,	'ENDIF'
+
+	db	0
 ;
 ;
 ; Automatic symbols
@@ -19978,8 +20330,10 @@ automatic_symbols:
 	sym	type_con_int,		15,		'EVENT_QMT'
 
 	db	0
-
-
+;
+;
+; Spin2 level symbols
+;
 level43_symbols:
 
 	sym	type_conlstr,		0,		'LSTRING'
@@ -20009,9 +20363,28 @@ level45_symbols:
 
 	db	0
 
+
 level46_symbols:
 
 	sym	type_debug_cmd,		dc_c_z_pre,	'C_Z'
+
+	db	0
+
+
+level47_symbols:
+
+	sym	type_i_taskspin,	bc_taskspin,	'TASKSPIN'
+	sym	type_i_flex,		fc_tasknext,	'TASKNEXT'
+	sym	type_i_flex,		fc_taskstop,	'TASKSTOP'
+	sym	type_i_flex,		fc_taskhalt,	'TASKHALT'
+	sym	type_i_flex,		fc_taskcont,	'TASKCONT'
+	sym	type_i_flex,		fc_taskchk,	'TASKCHK'
+	sym	type_i_flex,		fc_taskid,	'TASKID'
+	sym	type_con_int,		0FFFFFFFFh,	'NEWTASK'
+	sym	type_con_int,		0FFFFFFFFh,	'THISTASK'
+	sym	type_register,		taskhlt_reg,	'TASKHLT'
+
+	db	0
 ;
 ;
 ;*********

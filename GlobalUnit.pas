@@ -44,8 +44,9 @@ type
     Error:		boolean;
     ErrorMsg:           PChar;
 
-    PasmMode:           boolean;
     DebugMode:          boolean;
+    PreprocessorUsed:   boolean;
+    PasmMode:           boolean;
 
     Source:		PByteArray;
     SourceStart:	integer;
@@ -141,6 +142,7 @@ end;
 
   // Assembly interface
   function  P2InitStruct: pointer; external;
+  procedure P2Compile0; external;
   procedure P2Compile1; external;
   procedure P2Compile2; external;
   procedure P2InsertInterpreter; external;
