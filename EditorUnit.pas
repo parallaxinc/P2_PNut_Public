@@ -197,7 +197,7 @@ type
   procedure CompilerError(ErrorMsg: string);
   procedure LoadCompilerFile(Filename: string);
   procedure SaveFile(Filename: string; Start: Pointer; Bytes: integer);
-  procedure ComposeRAM(ProgramFlash, DownloadToRAM: boolean);
+  procedure ComposeRAM(SaveFlash, ProgramFlash, DownloadToRAM: boolean);
   procedure ComposeROM;
   procedure LoadObj(Filename: string);
   procedure LoadBin(Filename: string);
@@ -320,6 +320,7 @@ begin
   P2.ListLimit := ListLimit;
   P2.Doc := @DocBuffer;
   P2.DocLimit := DocLimit;
+  P2.PreSymbols := 0;
 
   Edit := @SourceBuffer;
   EditLimit := SourceLimit;
@@ -343,6 +344,11 @@ begin
 end;
 
 procedure TEditorForm.FormShow(Sender: TObject);
+var
+  cmd: boolean;
+  i: integer;
+  c, p: byte;
+  s: string;
 begin
   BatchMode := False;
   ExitCode := 0;
@@ -403,14 +409,84 @@ begin
     else
       TopFilename := ExpandFilename(ParamStr(1));
     LoadEditorFile(TopFilename);
-    if (ParamCount = 2) and ( (ParamStr(2) = '-c' ) or
-                              (ParamStr(2) = '-cd') or
-                              (ParamStr(2) = '-cf') or
-                              (ParamStr(2) = '-cb') or
-                              (ParamStr(2) = '-r' ) or
-                              (ParamStr(2) = '-rd') or
-                              (ParamStr(2) = '-f' ) or
-                              (ParamStr(2) = '-fd') ) then
+    //
+    // check for -D and -U preprocessor symbols
+    //
+    // if ParamCount >= 2 and even then -xx command (filename -xx {-D|U symbol})
+    // if ParamCount >= 1 and odd then no command   (filename {-D|U symbol})
+    //
+    cmd := (ParamCount >= 2) and
+      ((ParamStr(2) = '-c' ) or
+       (ParamStr(2) = '-cd') or
+       (ParamStr(2) = '-cf') or
+       (ParamStr(2) = '-cb') or
+       (ParamStr(2) = '-ci') or
+       (ParamStr(2) = '-r' ) or
+       (ParamStr(2) = '-rd') or
+       (ParamStr(2) = '-f' ) or
+       (ParamStr(2) = '-fd'));
+    if (cmd and (ParamCount > 2)) or (not cmd and (ParamCount > 1)) then
+    begin
+      if cmd and (ParamCount > 2) then i := 3 else i := 2;
+      repeat
+        if (ParamStr(i) = '-D') or (ParamStr(i) = '-U') then
+        begin
+          if P2.PreSymbols = 32 then
+          begin
+            WriteErrorFile('too_many_preprocessor_symbols');
+            ExitCode := 1;
+            Close;
+            Exit;
+          end;
+          if i + 1 > ParamCount then
+          begin
+            WriteErrorFile('preprocessor_symbol_missing');
+            ExitCode := 1;
+            Close;
+            Exit;
+          end;
+          s := UpperCase(ParamStr(i + 1));
+          p := Length(s);
+          if p > 31 then
+          begin
+            WriteErrorFile('preprocessor_symbol_too_long');
+            ExitCode := 1;
+            Close;
+            Exit;
+          end;
+          if not (s[1] in ['A'..'Z', '_']) then
+          begin
+            WriteErrorFile('preprocessor_symbol_starts_with_illegal_chr');
+            ExitCode := 1;
+            Close;
+            Exit;
+          end;
+          for c := 1 to p do
+          begin
+            if not (s[c] in ['0'..'9', 'A'..'Z', '_']) then
+            begin
+              WriteErrorFile('preprocessor_symbol_contains_illegal_chr');
+              ExitCode := 1;
+              Close;
+              Exit;
+            end;
+            p2.PreSymbolNames[P2.PreSymbols * 32 + c - 1] := Byte(s[c]);
+          end;
+          P2.PreSymbolNames[P2.PreSymbols * 32 + p] := 0;
+          P2.PreSymbolDefines[P2.PreSymbols] := (ParamStr(i) = '-D');
+          Inc(P2.PreSymbols);
+          Inc(i, 2);
+        end
+        else
+        begin
+          WriteErrorFile('expected_D_or_U');
+          ExitCode := 1;
+          Close;
+          Exit;
+        end;
+      until i > ParamCount;
+    end;
+    if cmd then
     begin
       BatchMode := True;
       try
@@ -428,6 +504,7 @@ begin
       try
         RunGenerateBinaryItem.Checked := True;
         ComposeRAM(
+          (ParamStr(2) = '-ci'),
           (ParamStr(2) = '-cf') or (ParamStr(2) = '-cb') or (ParamStr(2) = '-f') or (ParamStr(2) = '-fd'),
           (ParamStr(2) = '-r')  or (ParamStr(2) = '-rd') or (ParamStr(2) = '-f') or (ParamStr(2) = '-fd'));
       except
@@ -938,7 +1015,7 @@ procedure TEditorForm.RunCompile(Sender: TObject);
 begin
   P2.DebugMode := False;
   Compile(cObjOff, cListOff, cDocOff); // aborts if error
-  ComposeRAM(False, False);
+  ComposeRAM(False, False, False);
   InfoForm.ShowModal;
 end;
 
@@ -946,7 +1023,7 @@ procedure TEditorForm.RunCompileDebug(Sender: TObject);
 begin
   P2.DebugMode := True;
   Compile(cObjOff, cListOff, cDocOff); // aborts if error
-  ComposeRAM(False, False);
+  ComposeRAM(False, False, False);
   InfoForm.ShowModal;
 end;
 
@@ -957,7 +1034,7 @@ begin
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := False;
   Compile(cObjOff, cListOff, cDocOff); // aborts if error
-  ComposeRAM(False, True)
+  ComposeRAM(False, False, True)
 end;
 
 procedure TEditorForm.RunCompileLoadDebug(Sender: TObject);
@@ -967,7 +1044,7 @@ begin
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := True;
   Compile(cObjOff, cListOff, cDocOff); // aborts if error
-  ComposeRAM(False, True)
+  ComposeRAM(False, False, True)
 end;
 
 procedure TEditorForm.RunCompileProgram(Sender: TObject);
@@ -977,7 +1054,7 @@ begin
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := False;
   Compile(cObjOff, cListOff, cDocOff); // aborts if error
-  ComposeRAM(True, True);
+  ComposeRAM(False, True, True);
 end;
 
 procedure TEditorForm.RunCompileProgramDebug(Sender: TObject);
@@ -987,7 +1064,7 @@ begin
   if NeedToStopDebugFirst then Exit;
   P2.DebugMode := True;
   Compile(cObjOff, cListOff, cDocOff); // aborts if error
-  ComposeRAM(True, True);
+  ComposeRAM(False, True, True);
 end;
 
 procedure TEditorForm.RunDebugToggle(Sender: TObject);
@@ -2588,7 +2665,7 @@ begin
   end;
 end;
 
-procedure TEditorForm.ComposeRAM(ProgramFlash, DownloadToRAM: boolean);
+procedure TEditorForm.ComposeRAM(SaveFlash, ProgramFlash, DownloadToRAM: boolean);
 var
   s: integer;
 begin
@@ -2631,6 +2708,13 @@ begin
     SaveFile(ExtFilename(CurrentFilename, 'bin'), @P2.Obj, P2.ObjLength);
   // download to RAM?
   if DownloadToRAM then LoadHardware;
+  // save flash file?
+  if SaveFlash then
+  begin
+    P2MakeFlashFile;
+    if P2.Error then CompilerError(P2.ErrorMsg);  //aborts if error
+    SaveFile(ExtFilename(CurrentFilename, 'flash'), @P2.Obj, P2.ObjLength);
+  end;
 end;
 
 procedure TEditorForm.ComposeROM;

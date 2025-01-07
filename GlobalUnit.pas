@@ -26,6 +26,7 @@ const
 
   ObjLimit              = $100000;
   FileLimit             = 32;
+  PreSymbolLimit        = 16;
   ParamLimit            = 16;
   InfoLimit             = 1000;
   DebugDataLimit        = $4000;
@@ -59,6 +60,10 @@ type
     Doc:		PByteArray;
     DocLimit:           integer;
     DocLength:          integer;
+
+    PreSymbols:         integer;
+    PreSymbolNames:     array[0..PreSymbolLimit*32-1] of byte;
+    PreSymbolDefines:   array[0..PreSymbolLimit-1] of boolean;
 
     Params:             integer;
     ParamNames:         array[0..ParamLimit*32-1] of byte;
@@ -147,8 +152,9 @@ end;
   procedure P2Compile2; external;
   procedure P2InsertInterpreter; external;
   procedure P2InsertDebugger; external;
-  procedure P2InsertFlashLoader; external;
   procedure P2InsertClockSetter; external;
+  procedure P2InsertFlashLoader; external;
+  procedure P2MakeFlashFile; external;
   procedure P2ResetDebugSymbols; external;
   procedure P2ParseDebugString; external;
   procedure P2Disassemble; external;

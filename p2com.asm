@@ -30,8 +30,9 @@
 			public	P2Compile2
 			public	P2InsertInterpreter
 			public	P2InsertDebugger
-			public	P2InsertFlashLoader
 			public	P2InsertClockSetter
+			public	P2InsertFlashLoader
+			public	P2MakeFlashFile
 			public	P2ResetDebugSymbols
 			public	P2ParseDebugString
 			public	P2Disassemble
@@ -43,6 +44,7 @@ spin2_version		=	47
 
 obj_limit		=	100000h		;must be same in delphi
 file_limit		=	32		;must be same in delphi
+pre_symbol_limit	=	16		;must be same in delphi
 param_limit		=	16		;must be same in delphi
 info_limit		=	1000		;must be same in delphi
 debug_data_limit	=	4000h		;must be same in delphi
@@ -1593,6 +1595,10 @@ ddx		doc						;doc pointer (limit and length follow)
 ddx		doc_limit					;doc limit
 ddx		doc_length					;doc length
 
+ddx		pre_symbols					;preprocessor symbols
+dbx		pre_symbol_names,pre_symbol_limit*32		;preprocessor symbol names
+dbx		pre_symbol_defines,pre_symbol_limit		;preprocessor symbol defines
+
 ddx		params						;object parameters
 dbx		param_names,param_limit*32			;object parameter names
 dbx		param_types,param_limit				;object parameter types
@@ -1789,6 +1795,29 @@ ddx		obj_stack_ptr					;recursion level
 ;
 ;
 ;************************************************************************
+;*  procedure P2InsertClockSetter;					*
+;************************************************************************
+;
+		proc	P2InsertClockSetter
+
+		cld
+		push	ebx
+		push	esi
+		push	edi
+		push	ebp
+
+		call	_insert_clock_setter
+
+		pop	ebp
+		pop	edi
+		pop	esi
+		pop	ebx
+		ret
+
+		endp	P2InsertClockSetter
+;
+;
+;************************************************************************
 ;*  procedure P2InsertFlashLoader;					*
 ;************************************************************************
 ;
@@ -1812,10 +1841,10 @@ ddx		obj_stack_ptr					;recursion level
 ;
 ;
 ;************************************************************************
-;*  procedure P2InsertClockSetter;					*
+;*  procedure P2MakeFlashFile;						*
 ;************************************************************************
 ;
-		proc	P2InsertClockSetter
+		proc	P2MakeFlashFile
 
 		cld
 		push	ebx
@@ -1823,7 +1852,7 @@ ddx		obj_stack_ptr					;recursion level
 		push	edi
 		push	ebp
 
-		call	_insert_clock_setter
+		call	_make_flash_file
 
 		pop	ebp
 		pop	edi
@@ -1831,7 +1860,7 @@ ddx		obj_stack_ptr					;recursion level
 		pop	ebx
 		ret
 
-		endp	P2InsertClockSetter
+		endp	P2MakeFlashFile
 ;
 ;
 ;************************************************************************
@@ -2728,6 +2757,18 @@ _insert_debugger:
 		jmp	compile_done		;exit
 ;
 ;
+; InsertClockSetter
+;
+_insert_clock_setter:
+
+		mov	[error],1		;init error to true
+		mov	[esp_save],esp		;save esp in case of error
+
+		call	insert_clock_setter	;insert clock setter
+
+		jmp	compile_done		;exit
+;
+;
 ; InsertFlashLoader
 ;
 _insert_flash_loader:
@@ -2740,14 +2781,14 @@ _insert_flash_loader:
 		jmp	compile_done		;exit
 ;
 ;
-; InsertClockSetter
+; MakeFlashFile
 ;
-_insert_clock_setter:
+_make_flash_file:
 
 		mov	[error],1		;init error to true
 		mov	[esp_save],esp		;save esp in case of error
 
-		call	insert_clock_setter	;insert clock setter
+		call	make_flash_file		;make flash file
 
 		jmp	compile_done		;exit
 ;
@@ -7017,47 +7058,6 @@ debugger:	include "Spin2_debugger.inc"
 debugger_end:
 ;
 ;
-; Insert flash loader
-;
-insert_flash_loader:
-
-		call	pad_obj_long			;pad obj to next long alignment for checksum computation
-
-		mov	eax,[size_flash_loader]		;move program upwards to accommodate flash loader
-		call	move_obj_up
-
-		lea	esi,[flash_loader]		;install flash loader
-		lea	edi,[obj]
-		mov	ecx,eax
-	rep	movsb
-
-		cmp	[debug_mode],0			;if not debug mode, force NOP instruction at WRPIN
-		jne	@@debugmode
-		mov	[dword obj+@@_debugnop_],0
-		jmp	@@notdebugmode
-@@debugmode:	mov	al,[debug_pin_tx]		;debug mode, install debug_pin_tx into WRPIN
-		or	[obj+@@_debugnop_],al
-@@notdebugmode:
-		mov	ecx,[obj_ptr]			;compute negative sum of all data
-		shr	ecx,2
-		mov	ebx,0
-		lea	esi,[obj]
-@@sum:		lodsd
-		sub	ebx,eax
-		loop	@@sum
-
-		mov	[dword obj+@@_checksum_],ebx	;insert checksum into loader
-
-		ret
-
-
-@@_checksum_	=	04h
-@@_debugnop_	=	08h
-
-flash_loader:	include	"flash_loader.inc"
-flash_loader_end:
-;
-;
 ; Insert clock setter
 ;
 insert_clock_setter:
@@ -7116,6 +7116,106 @@ insert_clock_setter:
 
 clock_setter:	include	"clock_setter.inc"
 clock_setter_end:
+;
+;
+; Insert flash loader
+;
+insert_flash_loader:
+
+		call	pad_obj_long			;pad obj to next long alignment for checksum computation
+
+		mov	eax,[size_flash_loader]		;move program upwards to accommodate flash loader
+		call	move_obj_up
+
+		lea	esi,[flash_loader]		;install flash loader
+		lea	edi,[obj]
+		mov	ecx,eax
+	rep	movsb
+
+		cmp	[debug_mode],0			;if not debug mode, force NOP instruction at WRPIN
+		jne	@@debugmode
+		mov	[dword obj+@@_debugnop_],0
+		jmp	@@notdebugmode
+@@debugmode:	mov	al,[debug_pin_tx]		;debug mode, install debug_pin_tx into WRPIN
+		or	[obj+@@_debugnop_],al
+@@notdebugmode:
+		mov	ecx,[obj_ptr]			;compute negative sum of all data
+		shr	ecx,2
+		mov	ebx,0
+		lea	esi,[obj]
+@@sum:		lodsd
+		sub	ebx,eax
+		loop	@@sum
+
+		mov	[dword obj+@@_checksum_],ebx	;insert checksum into loader
+
+		ret
+
+
+@@_checksum_	=	04h
+@@_debugnop_	=	08h
+
+flash_loader:	include	"flash_loader.inc"
+flash_loader_end:
+;
+;
+; Make flash file
+;
+make_flash_file:
+
+		call	pad_obj_long			;pad obj to next long alignment
+
+		mov	edx,[obj_ptr]			;get number of application longs
+		shr	edx,2
+
+		mov	eax,@@loader_size		;move program upwards to accommodate flash loader
+		call	move_obj_up
+
+		lea	edi,[obj]			;install flash loader
+		lea	esi,[flash_loader+@@loader_offset]
+		mov	ecx,@@loader_size
+	rep	movsb
+
+		mov	eax,edx				;get number of app longs
+		lea	edi,[obj+@@app_longs]
+		stosd					;set app_longs
+		stosd					;set app_longs2
+
+		lea	esi,[obj+@@loader_size]		;compute app checksum
+		mov	ecx,edx
+		xor	ebx,ebx
+@@sumapp:	lodsd
+		sub	ebx,eax
+		loop	@@sumapp
+		mov	eax,ebx
+		stosd					;set app_sum
+
+		lea	esi,[obj]			;compute loader checksum
+		mov	ecx,100h
+		xor	ebx,ebx
+@@sumloader:	lodsd
+		sub	ebx,eax
+		loop	@@sumloader
+		mov	eax,ebx
+		stosd					;set loader_sum
+
+		mov	ecx,100h*4			;if less than 100h longs, pad to 100h
+		sub	ecx,[obj_ptr]
+		jbe	@@nopad
+		mov	al,0
+@@pad:		call	enter_obj
+		loop	@@pad
+@@nopad:
+		ret
+
+
+@@loader_offset	=	160h
+@@loader_size	=	1F0h - @@loader_offset
+
+@@app_longs	=	@@loader_size - 10h
+@@app_longs2	=	@@loader_size - 0Ch
+@@app_sum	=	@@loader_size - 08h
+@@loader_sum	=	@@loader_size - 04h
 ;
 ;
 ; Move obj block upward by eax bytes (reverse move)
@@ -18624,11 +18724,32 @@ enter_symbols_pre:
 
 		call	reset_symbols_pre
 		call	write_symbols_pre
-		lea	esi,[preprocessor_symbols]
+
+		lea	esi,[preprocessor_symbols]	;enter functional preprocessor symbols
 		cmp	[debug_mode],0			;add '__DEBUG__'?
 		je	@@enter
 		lea	esi,[preprocessor_symbols_debug]
-@@enter:	jmp	enter_symbols
+@@enter:	call	enter_symbols
+
+		mov	edi,0				;enter any external preprocessor symbols
+@@ext:		cmp	edi,[pre_symbols]
+		je	@@done
+		mov	esi,edi
+		shl	esi,5
+		add	esi,offset pre_symbol_names
+		call	hash_symbol
+		push	edi
+		lea	edi,[symbol2]
+	rep	movsb
+		pop	edi
+		mov	al,[pre_symbol_defines+edi]
+		movzx	ebx,al
+		mov	al,type_pre_symbol_ext
+		call	enter_symbol2
+		inc	edi
+		jmp	@@ext
+
+@@done:		ret
 ;
 ;
 ; Enter auto symbols into hashed symbol table

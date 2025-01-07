@@ -2,19 +2,19 @@
 
 set /A ERR = 0
 
-PNut_v47 Spin2_debugger -c
+PNut_v48 Spin2_debugger -c
 set /A ERR = %ERR% + %ERRORLEVEL%
 type error.txt
 
-PNut_v47 Spin2_interpreter -c
+PNut_v48 Spin2_interpreter -c
 set /A ERR = %ERR% + %ERRORLEVEL%
 type error.txt
 
-PNut_v47 flash_loader -c
+PNut_v48 flash_loader -c
 set /A ERR = %ERR% + %ERRORLEVEL%
 type error.txt
 
-PNut_v47 clock_setter -c
+PNut_v48 clock_setter -c
 set /A ERR = %ERR% + %ERRORLEVEL%
 type error.txt
 
