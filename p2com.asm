@@ -83,8 +83,8 @@ distiller_limit		=	10000h
 
 inline_limit		=	120h
 taskhlt_reg		=	1CCh
-mrecv_reg		=	1D2h
-msend_reg		=	1D3h
+mrecv_reg		=	1D1h
+msend_reg		=	1D2h
 pasm_regs		=	1D8h
 inline_locals		=	1E0h
 
