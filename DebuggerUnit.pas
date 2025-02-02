@@ -464,7 +464,6 @@ published
 
   procedure SmoothDot(x, y, radius, color: integer; opacity: byte);
   procedure SmoothLine(x1, y1, x2, y2, radius, color: integer; opacity: byte);
-  procedure SmoothSlice(swapxy: boolean; x, yb, yt, color: integer; opacity: byte);
   procedure SmoothPixel(swapxy: boolean; x, y, color: integer; opacity, opacity2: byte);
   function  SmoothClip(var x1, y1, x2, y2: integer): boolean;
   function  SmoothClipTest(x, y, lft, rgt, bot, top: integer): integer;
@@ -2572,10 +2571,8 @@ begin
     dst := @PByteArray(BitmapLine[y])[x * 3];
     for i := 1 to (count + 1) * 3 do
     begin
-      // New gamma-corrected alpha blending
-      dst^ := Round(Power((Power(dst^, 2.0) * (255 - opacity) + Power(src^, 2.0) * opacity) / 256, 0.5));
-      // Old linear alpha blending
-{     dst^ := (dst^ * not opacity + src^ * opacity + $FF) shr 8; }
+      // Gamma-corrected alpha blending
+      dst^ := Round(Power((Power(dst^, 2.0) * ($FF - opacity) + Power(src^, 2.0) * opacity) / $100, 0.5));
       Inc(dst);
       Inc(src);
     end;
@@ -2598,14 +2595,10 @@ begin
   end
   else
   begin
-    // New gamma-corrected alpha blending
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 00 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 08 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 16 and $FF, 2.0) * opacity) / 256, 0.5));
-    // Old linear alpha blending
-{   p^ := ((p^ * not opacity + (SmoothFillColor shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (SmoothFillColor shr 08 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (SmoothFillColor shr 16 and $FF) * opacity) + $FF) shr 8; }
+    // Gamma-corrected alpha blending
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(SmoothFillColor shr 00 and $FF, 2.0) * opacity) / $100, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(SmoothFillColor shr 08 and $FF, 2.0) * opacity) / $100, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(SmoothFillColor shr 16 and $FF, 2.0) * opacity) / $100, 0.5));
   end;
 end;
 
@@ -2627,10 +2620,11 @@ const
 var
   radius1, radius2, span, dx, dy,
   x1f, y1f, x2f, y2f, xleft, xright,
-  b, ym, slice, lt, lb, rt, rb, x, y,
-  xp, yp, yl, yr, yt, yb: integer;
+  slice, lt, lb, rt, rb, x, y,
+  xp, yp, yl, yr, yt, yb, yn: integer;
+  yd, ym: int64;
   xo, yo: byte;
-  th, m: extended;
+  th: extended;
   swapxy: boolean;
   y1_lut1: array[-limr..limr] of integer;
   y2_lut1: array[-limr..limr] of integer;
@@ -2641,14 +2635,13 @@ var
 begin
   // center 8-bit-fractional coordinates within pixels
   Inc(x1, $80);
-  Inc(x2, $80);
   Inc(y1, $80);
+  Inc(x2, $80);
   Inc(y2, $80);
   // clip line and exit if outside bitmap
   if not SmoothClip(x1, y1, x2, y2) then Exit;
-  // get radius values and span
+  // get radius and span
   radius1 := Min(radius, maxr shl 8);
-  radius2 := radius1 + $80;
   span := radius1 shr 8 + 1;
   // get x-dominance
   swapxy := Abs(y2 - y1) > Abs(x2 - x1);
@@ -2673,35 +2666,32 @@ begin
   for xp := -span to span do
   begin
     // 1D-slice lookups, actual radius
-    y1_lut1[xp] := Round(Sin(ArcCos(Max(Min(xp shl 8 + x1f, radius1), -radius1) / radius1)) * radius1);
-    y2_lut1[xp] := Round(Sin(ArcCos(Max(Min(xp shl 8 + x2f, radius1), -radius1) / radius1)) * radius1);
+    y1_lut1[xp] := Round(Sqrt(Power(radius1, 2.0) - Power((Min(Abs(xp shl 8 + x1f), radius1)), 2.0)));
+    y2_lut1[xp] := Round(Sqrt(Power(radius1, 2.0) - Power((Min(Abs(xp shl 8 + x2f), radius1)), 2.0)));
     // 2D-slice lookups, radius+$80 reduces to actual radius after 2D opacity modulation
-    x1_lut2[xp] := Round(Sin(ArcCos(Max(Min(xp shl 8 + y1f, radius1), -radius1) / radius2)) * radius2);
-    y1_lut2[xp] := Round(Sin(ArcCos(Max(Min(xp shl 8 + x1f, radius1), -radius1) / radius2)) * radius2);
-    x2_lut2[xp] := Round(Sin(ArcCos(Max(Min(xp shl 8 + y2f, radius1), -radius1) / radius2)) * radius2);
-    y2_lut2[xp] := Round(Sin(ArcCos(Max(Min(xp shl 8 + x2f, radius1), -radius1) / radius2)) * radius2);
+    x1_lut2[xp] := Round(Sqrt(Power(radius1 + $80, 2.0) - Power((Min(Abs(xp shl 8 + y1f), radius1)), 2.0)));
+    y1_lut2[xp] := Round(Sqrt(Power(radius1 + $80, 2.0) - Power((Min(Abs(xp shl 8 + x1f), radius1)), 2.0)));
+    x2_lut2[xp] := Round(Sqrt(Power(radius1 + $80, 2.0) - Power((Min(Abs(xp shl 8 + y2f), radius1)), 2.0)));
+    y2_lut2[xp] := Round(Sqrt(Power(radius1 + $80, 2.0) - Power((Min(Abs(xp shl 8 + x2f), radius1)), 2.0)));
   end;
-  // register x1 and x2 to pixel centers
+  // register xleft and xright to pixel centers
   xleft := (x1 - radius1) and $FFFFFF00 + $80;
   xright := (x2 + radius1) and $FFFFFF00 + $80;
   // get angle metrics
-  th := ArcTan2(y2 - y1, x2 - x1);           // get angle
-  m := Tan(th);                              // get slope
-  b := y1 - Round(m * x1);                   // get 8-bit-fractional y-intercept
-  ym := Round(((xleft * m) + b) * $100);     // get initial y with 16-bit fraction at x1
-  dy := Round(m * $10000);                   // get 16-bit-fractional delta-y
-  slice := Round(radius1 / Cos(th));         // get slice size
-  // get circle departure/arrival points
-  dx := Round(Cos(th + Pi/2) * radius1);
-  lt := x1 - dx;
-  lb := x1 + dx;
-  rt := x2 - dx;
-  rb := x2 + dx;
-  // draw complete line with left and right endpoint circles
+  yd := Int64($10000) * (y2 - y1) div Max(x2 - x1, 1);       // get 16-bit slope, prevent divide-by-zero
+  ym := yd * (xleft - x1) div $100 + y1 * $100;              // get initial y with 16-bit fraction at x1
+  th := ArcTan2(y2 - y1, x2 - x1);                           // get angle
+  dx := Round(radius1 * Sin(th));                            // get semicircle departure/arrival points
+  lt := x1 + dx;
+  lb := x1 - dx;
+  rt := x2 + dx;
+  rb := x2 - dx;
+  slice := (radius1 * $10000) div Round(Cos(th) * $10000);   // get slice size
+  // draw complete line with left and right endpoint semicircles
   x := xleft;
   while x <= xright do
   begin
-    // if in left circle before line departure, draw 2D slice
+    // if in left semicircle before line departure, draw 2D slice
     if (x <= lt) and (x <= lb) then
     begin
       xp := x1 div $100 - x div $100;
@@ -2716,7 +2706,7 @@ begin
         SmoothPixel(swapxy, x shr 8, y1 shr 8 - yp, color, (xo * yo + $FF) shr 8, opacity);
       end;
     end
-    // if in right circle after line arrival, draw 2D slice
+    // if in right semicircle after line arrival, draw 2D slice
     else
     if (x >= rt) and (x >= rb) then
     begin
@@ -2732,7 +2722,7 @@ begin
         SmoothPixel(swapxy, x shr 8, y2 shr 8 - yp, color, (xo * yo + $FF) shr 8, opacity)
       end;
     end
-    // between circles, draw 1D slice of line
+    // between semicircles, draw 1D slice of line
     else
     begin
       // get slice metrics
@@ -2740,36 +2730,28 @@ begin
       yr := y2_lut1[x2 div $100 - x div $100];
       y := ym div $100;
       // determine top
-      if x <= lt then yt := yl - (y1 - y)
-      else if x >= rt then yt := yr - (y2 - y)
-      else yt := slice;
+      if x <= lt then yb := y1 - yl
+      else if x >= rt then yb := y2 - yr
+      else yb := y - slice;
       // determine bottom
-      if x <= lb then yb := yl + (y1 - y)
-      else if x >= rb then yb := yr + (y2 - y)
-      else yb := slice;
+      if x <= lb then yt := y1 + yl
+      else if x >= rb then yt := y2 + yr
+      else yt := y + slice;
       // draw bottom-to-top slice at x
-      SmoothSlice(swapxy, x div $100, y - yt, y + yb, color, opacity);
+      while yb < yt do
+      begin
+        yn := (yb or $FF) + 1;
+        if yt < yn then
+          yo := yt - yb
+        else
+          yo := not yb;
+        SmoothPixel(swapxy, x shr 8, yb shr 8, color, yo, opacity);
+        yb := yn;
+      end;
     end;
-  // step x and y
-  Inc(x, $100);
-  Inc(ym, dy);
-  end;
-end;
-
-procedure TDebuggerForm.SmoothSlice(swapxy: boolean; x, yb, yt, color: integer; opacity: byte);
-var
-  yn: integer;
-  opa: byte;
-begin
-  while yb < yt do
-  begin
-    yn := (yb or $FF) + 1;
-    if yt < yn then
-      opa := yt - yb
-    else
-      opa := not yb;
-    SmoothPixel(swapxy, x, yb shr 8, color, opa, opacity);
-    yb := yn;
+    // step x and y
+    Inc(x, $100);
+    Inc(ym, yd);
   end;
 end;
 
@@ -2795,14 +2777,10 @@ begin
   end
   else
   begin
-    // New gamma-corrected alpha blending
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(color shr 00 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(color shr 08 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(color shr 16 and $FF, 2.0) * opacity) / 256, 0.5));
-    // Old linear alpha blending
-{   p^ := ((p^ * not opacity + (color shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (color shr 08 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (color shr 16 and $FF) * opacity) + $FF) shr 8; }
+    // Gamma-corrected alpha blending
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(color shr 00 and $FF, 2.0) * opacity) / $100, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(color shr 08 and $FF, 2.0) * opacity) / $100, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(color shr 16 and $FF, 2.0) * opacity) / $100, 0.5));
   end;
 end;
 

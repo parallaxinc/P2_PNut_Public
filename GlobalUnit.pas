@@ -25,10 +25,11 @@ const
   HubLimit              = $80000;
 
   ObjLimit              = $100000;
-  FileLimit             = 32;
+  ObjDataLimit          = $200000;
+  FileLimit             = 255;
   PreSymbolLimit        = 16;
-  ParamLimit            = 16;
-  InfoLimit             = 1000;
+  ObjParamLimit         = 16;
+  InfoLimit             = 2000;
   DebugDataLimit        = $4000;
   DebugStringLimit      = $8000;
   DebugDisplayLimit     = 1100;         // allows 1k data elements + some commands
@@ -38,7 +39,7 @@ const
   DocLimit              = 5000000;
 
   ObjStackLimit         = 16;
-  ObjFileLimit          = FileLimit * ObjStackLimit;
+  ObjFileLimit          = 4000;
 
 type
   TP2 = packed record
@@ -63,12 +64,11 @@ type
 
     PreSymbols:         integer;
     PreSymbolNames:     array[0..PreSymbolLimit*32-1] of byte;
-    PreSymbolDefines:   array[0..PreSymbolLimit-1] of boolean;
 
     Params:             integer;
-    ParamNames:         array[0..ParamLimit*32-1] of byte;
-    ParamTypes:         array[0..ParamLimit-1] of byte;
-    ParamValues:        array[0..ParamLimit-1] of integer;
+    ParamNames:         array[0..ObjParamLimit*32-1] of byte;
+    ParamTypes:         array[0..ObjParamLimit-1] of byte;
+    ParamValues:        array[0..ObjParamLimit-1] of integer;
 
     Obj:                array[0..ObjLimit-1] of byte;
     ObjLength:          integer;
@@ -78,12 +78,12 @@ type
     ObjFilenamesStart:  array[0..FileLimit-1] of integer;
     ObjFilenamesFinish: array[0..FileLimit-1] of integer;
     ObjParams:          array[0..FileLimit-1] of integer;
-    ObjParamNames:      array[0..FileLimit*ParamLimit*32-1] of byte;
-    ObjParamTypes:      array[0..FileLimit*ParamLimit-1] of byte;
-    ObjParamValues:     array[0..FileLimit*ParamLimit-1] of integer;
+    ObjParamNames:      array[0..FileLimit*ObjParamLimit*32-1] of byte;
+    ObjParamTypes:      array[0..FileLimit*ObjParamLimit-1] of byte;
+    ObjParamValues:     array[0..FileLimit*ObjParamLimit-1] of integer;
     ObjOffsets:         array[0..FileLimit-1] of integer;
     ObjLengths:         array[0..FileLimit-1] of integer;
-    ObjData:            array[0..ObjLimit -1] of byte;
+    ObjData:            array[0..ObjDataLimit-1] of byte;
     ObjInstances:       array[0..FileLimit-1] of integer;
     ObjTitle:           array[0..255] of byte;
 
@@ -93,7 +93,7 @@ type
     DatFilenamesFinish: array[0..FileLimit-1] of integer;
     DatOffsets:         array[0..FileLimit-1] of integer;
     DatLengths:         array[0..FileLimit-1] of integer;
-    DatData:            array[0..ObjLimit -1] of byte;
+    DatData:            array[0..ObjLimit-1] of byte;
 
     InfoCount:          integer;        // used by PropellerTool
     InfoStart:          array[0..InfoLimit-1] of integer;
@@ -177,10 +177,10 @@ var
   DocBuffer          : array[0..DocLimit] of byte; // +1 allows end reading
 
   ObjFilePtr         : integer;
-  ObjFileBuff        : array[0..ObjLimit] of byte;
   ObjFileCount       : integer;
-  ObjFileOffset      : array[0..ObjFileLimit-1] of integer;
-  ObjFileLength      : array[0..ObjFileLimit-1] of integer;
+  ObjFileOffsets     : array[0..ObjFileLimit-1] of integer;
+  ObjFileLengths     : array[0..ObjFileLimit-1] of integer;
+  ObjFileLastIndex   : integer;
 
   FontName           : string;
   FontSize           : integer;

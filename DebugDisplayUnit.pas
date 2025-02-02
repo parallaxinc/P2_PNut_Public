@@ -1,11 +1,6 @@
 {$A+,B-,C+,D+,E-,F-,G+,H+,I+,J-,K-,L+,M-,N+,O+,P+,Q-,R-,S-,T-,U-,V+,W-,X+,Y+,Z1}
-{$MINSTACKSIZE $00004000}
-{$MAXSTACKSIZE $00100000}
-{$IMAGEBASE $00400000}
-{$APPTYPE GUI}
-{$A+,B-,C+,D+,E-,F-,G+,H+,I+,J-,K-,L+,M-,N+,O+,P+,Q-,R-,S-,T-,U-,V+,W-,X+,Y+,Z1}
-{$MINSTACKSIZE $00004000}
-{$MAXSTACKSIZE $00100000}
+{$MINSTACKSIZE $00400000}
+{$MAXSTACKSIZE $00400000}
 {$IMAGEBASE $00400000}
 {$APPTYPE GUI}
 unit DebugDisplayUnit;
@@ -158,10 +153,8 @@ const
   DataSets              = 1 shl DataSetsExp;
 
   Channels              = 8;
-  TopChannel            = Channels - 1;
 
   LogicChannels         = 32;
-  TopLogicChannel       = LogicChannels - 1;
 
   LogicSets             = DataSets;
   LogicPtrMask          = LogicSets - 1;
@@ -301,17 +294,18 @@ private
   vHoldOffCount         : integer;
   vToggle               : boolean;
   vLogicIndex           : integer;
-  vLogicLabel           : array [0..TopLogicChannel] of string;
-  vLogicColor           : array [0..TopLogicChannel] of integer;
-  vLabel                : array [0..TopChannel] of string;
-  vAuto                 : array [0..TopChannel] of boolean;
-  vHigh                 : array [0..TopChannel] of integer;
-  vLow                  : array [0..TopChannel] of integer;
-  vMag                  : array [0..TopChannel] of integer;
-  vTall                 : array [0..TopChannel] of integer;
-  vBase                 : array [0..TopChannel] of integer;
-  vGrid                 : array [0..TopChannel] of integer;
-  vColor                : array [0..TopChannel] of integer;
+  vLogicLabel           : array [0..LogicChannels - 1] of string;
+  vLogicColor           : array [0..LogicChannels - 1] of integer;
+  vLogicBits            : array [0..LogicChannels - 1] of byte;
+  vLabel                : array [0..Channels - 1] of string;
+  vAuto                 : array [0..Channels - 1] of boolean;
+  vHigh                 : array [0..Channels - 1] of integer;
+  vLow                  : array [0..Channels - 1] of integer;
+  vMag                  : array [0..Channels - 1] of integer;
+  vTall                 : array [0..Channels - 1] of integer;
+  vBase                 : array [0..Channels - 1] of integer;
+  vGrid                 : array [0..Channels - 1] of integer;
+  vColor                : array [0..Channels - 1] of integer;
   vLut                  : array [0..255] of integer;
   vColorTune            : integer;
   vPolar                : boolean;
@@ -484,7 +478,6 @@ published
   procedure SetDefaults;
   procedure SetTextMetrics;
   procedure SetSize(MarginLeft, MarginTop, MarginRight, MarginBottom: integer);
-  procedure SetLogicLabelColor(ChannelLabel: string; Number, ColorIndex: integer);
   procedure SetTrace(Path: integer; ModifyRate: boolean);
   procedure StepTrace;
   procedure PolarToCartesian(var rho_x, theta_y: integer);
@@ -518,6 +511,7 @@ published
   function  SmoothClip(var x1, y1, x2, y2: integer): boolean;
   function  SmoothClipTest(x, y, lft, rgt, bot, top: integer): integer;
 
+  function  NextKeyIs(keyval: integer): boolean;
   function  NextKey: boolean;
   function  NextNum: boolean;
   function  NextStr: boolean;
@@ -910,14 +904,17 @@ end;
 
 procedure TDebugDisplayForm.LOGIC_Configure;
 var
-  i, v: integer;
+  i, v, color: integer;
   s: string;
+  isRange: boolean;
 begin
   // Set unique defaults
   vSamples := 32;
   vSpacing := 8;
   vRate := 1;
   vLogicIndex := 0;
+  vDotSize := 0;
+  vLineSize := 3;
   vTextSize := FontSize;
   // Process any parameters
   while not NextEnd do
@@ -932,11 +929,13 @@ begin
       key_samples:
         KeyValWithin(vSamples, 4, LogicSets - 1);
       key_spacing:
-        KeyValWithin(vSpacing, 2, 32);
+        KeyValWithin(vSpacing, 2-1, 32);
       key_rate:
         KeyValWithin(vRate, 1, LogicSets);
+      key_dotsize:
+        KeyValWithin(vDotSize, 0, 32);
       key_linesize:
-        KeyValWithin(vLineSize, 1, 7);
+        KeyValWithin(vLineSize, 1, 32);
       key_textsize:
         KeyTextSize;
       key_color:
@@ -950,17 +949,38 @@ begin
     else
     if NextStr then
     begin
-      // Enter a label name
+      // new channel(s) name
       s := PChar(val);
-      if vIndex <> Channels then Inc(vIndex);
-      SetLogicLabelColor(s, -1, vIndex - 1);
-      if not KeyValWithin(v, 1, LogicChannels) then Continue;
-      if v > 1 then
+      if vLogicIndex < LogicChannels then
       begin
-        Dec(vLogicIndex);
-        for i := 0 to v - 1 do SetLogicLabelColor(s, i, vIndex - 1);
+        vLogicLabel[vLogicIndex] := s;
+        if not KeyValWithin(v, 1, LogicChannels) then v := 1;
+        MaxLimit(v, LogicChannels - vLogicIndex);
+        isRange := NextKeyIs(key_range);
+        if not KeyColor(color) then color := DefaultScopeColors[vLogicIndex mod 8];
+        for i := 0 to v - 1 do
+        begin
+          vLogicColor[vLogicIndex + i] := color;
+          if isRange then
+          begin
+            vLogicBits[vLogicIndex + i] := v;
+            if i = 1 then
+            begin
+               vLogicLabel[vLogicIndex + 1] := IntToStr(v);
+               vLogicColor[vLogicIndex + 1] := vLogicColor[vLogicIndex + 1] shr 2 and $3F3F3F;
+            end;
+            if i > 1 then vLogicLabel[vLogicIndex + i] := '';
+          end
+          else
+          begin
+            vLogicBits[vLogicIndex + i] := 1;
+            if v > 1 then
+              if i = 0 then vLogicLabel[vLogicIndex] := s + ' 0'
+              else vLogicLabel[vLogicIndex + i] := IntToStr(i);
+          end;
+        end;
+        Inc(vLogicIndex, v);
       end;
-      KeyColor(vColor[vIndex - 1]);
     end;
   end;
   // If no labels specified, do 32 channels
@@ -969,7 +989,8 @@ begin
     for i := 0 to LogicChannels - 1 do
     begin
       vLogicLabel[i] := IntToStr(i);
-      vLogicColor[i] := 0;
+      vLogicColor[i] := DefaultScopeColors[0];
+      vLogicBits[i] := 1;
     end;
     vLogicIndex := LogicChannels;
   end
@@ -1038,7 +1059,7 @@ begin
         if vTriggerMask <> 0 then
         begin
           if SamplePop <> vSamples then Continue;    // if sample buffer not full, exit
-          t := LogicSampleBuff[(SamplePtr - vTriggerOffset - 1) and LogicPtrMask];
+          t := LogicSampleBuff[(SamplePtr - vTriggerOffset) and LogicPtrMask];
           if vArmed then
           begin
             if ((t xor vTriggerMatch) and vTriggerMask) = 0 then
@@ -1065,22 +1086,38 @@ end;
 
 procedure TDebugDisplayForm.LOGIC_Draw;
 var
-  j, k, b, x, y: integer;
+  j, k, x, top, bot, color, colordim: integer;
+  mask, v, y: int64;
+  first, last: boolean;
 begin
   ClearBitmap;
-  Bitmap[0].Canvas.Pen.Width := vLineSize;
-  for j := 0 to vLogicIndex - 1 do
+  j := 0;
+  while j < vLogicIndex do
   begin
-    Bitmap[0].Canvas.Pen.Color := WinRGB(vColor[vLogicColor[j]]);
+    // Set waveform attributes
+    color := vLogicColor[j];
+    colordim := color shr 2 and $3F3F3F;
+    bot := (vMarginTop + vHeight - ChrHeight * j                       - ChrHeight *  3 shr 4) shl 8;
+    top := (vMarginTop + vHeight - ChrHeight * (j + vLogicBits[j] - 1) - ChrHeight * 13 shr 4) shl 8;
+    mask := Int64(1) shl vLogicBits[j] - 1;
+    // If range waveform, draw top and bottom boundary lines
+    if vLogicBits[j] > 1 then
+    begin
+      SmoothLine((vMarginLeft + 1) shl 8, top, (vMarginLeft + vWidth - 1) shl 8, top, $80, colordim, 255);
+      SmoothLine((vMarginLeft + 1) shl 8, bot, (vMarginLeft + vWidth - 1) shl 8, bot, $80, colordim, 255);
+    end;
+    // Plot waveform
     for k := SamplePop - 1 downto 0 do
     begin
-      b := ((LogicSampleBuff[(SamplePtr - k - 1) and LogicPtrMask] shr j) and 1) * 2 - 1;   // +-1
-      x := vMarginLeft + vWidth - (k + 1) * vSpacing;
-      y := vMarginTop + vHeight - ChrHeight * (j + 1) + ChrHeight div 2 - b * ChrHeight * 3 div 8;
-      if k = SamplePop - 1 then Bitmap[0].Canvas.MoveTo(x, y);
-      Bitmap[0].Canvas.LineTo(x, y);
-      Bitmap[0].Canvas.LineTo(x + vSpacing, y);
+      first := k = SamplePop - 1;
+      last := k = 0;
+      x := (vMarginLeft + vWidth - (k + 1) * vSpacing) shl 8;
+      v := (LogicSampleBuff[(SamplePtr - k - 1) and LogicPtrMask] shr j) and mask;
+      y := v * (top - bot) div mask + bot;
+      DrawLineDot(x + Ord(first) shl 8, y, color, first);
+      DrawLineDot(x + (vSpacing - Ord(last)) shl 8, y, color, false);
     end;
+    Inc(j, vLogicBits[j]);
   end;
   BitmapToCanvas(0);
 end;
@@ -1128,7 +1165,7 @@ begin
   end;
   // Set defaults
   if (vDotSize = 0) and (vLineSize = 0) then vDotSize := 1;
-  for i := 0 to TopChannel do
+  for i := 0 to Channels - 1 do
   begin
     vAuto[i] := False;
     vLow[i]  := -$80000000;
@@ -1160,11 +1197,8 @@ begin
     begin
       if vIndex <> Channels then Inc(vIndex);
       vLabel[vIndex - 1] := PChar(val);
-      if NextKey then
-      begin
-        if val <> key_auto then Continue;
-        vAuto[vIndex - 1] := True;
-      end
+      if NextKeyIs(key_auto) then
+        vAuto[vIndex - 1] := True
       else
       begin
         if not KeyVal( vLow[vIndex - 1]) then Continue;
@@ -1182,11 +1216,8 @@ begin
       begin
         vArmed := False;
         if not KeyValWithin(vTriggerChannel, -1, 7) then Continue;
-        if NextKey then
-        begin
-          if val <> key_auto then Continue;
-          vTriggerAuto := True;
-        end
+        if NextKeyIs(key_auto) then
+          vTriggerAuto := True
         else
         begin
           vTriggerAuto := False;
@@ -1552,7 +1583,7 @@ begin
   vRateCount := vRate - 1;
   // Set defaults
   if (vDotSize = 0) and (vLineSize = 0) then vDotSize := 1;
-  for i := 0 to TopChannel do
+  for i := 0 to Channels - 1 do
   begin
     vMag[i]  := 0;
     vHigh[i] := $7FFFFFFF;
@@ -2768,7 +2799,7 @@ begin
   vHeight := 256;
   vSamples := 256;
   vIndex := 0;
-  for i := 0 to TopChannel do vColor[i] := DefaultScopeColors[i];
+  for i := 0 to Channels - 1 do vColor[i] := DefaultScopeColors[i];
   vColorMode := key_rgb24;
   vColorTune := 0;
   vBackColor := DefaultBackColor;
@@ -2794,7 +2825,7 @@ begin
   vSparse := -1;
   vMouseWheel := 0;
   vKeyPress := 0;
-  for i := 0 to TopChannel do vLabel[i] := '';
+  for i := 0 to Channels - 1 do vLabel[i] := '';
   SetPack(0, False, False);
   SmoothFillSize := -1;
 end;
@@ -2851,21 +2882,6 @@ begin
   // Clear bitmap
   vTriggered := False;    // don't draw trigger indicator
   ClearBitmap;
-end;
-
-procedure TDebugDisplayForm.SetLogicLabelColor(ChannelLabel: string; Number, ColorIndex: integer);
-var
-  s: string;
-begin
-  if vLogicIndex < LogicChannels then
-  begin
-    if Number < 0 then s := ChannelLabel
-    else if Number = 0 then s := ChannelLabel + ' 0'
-    else s := IntToStr(Number);
-    vLogicLabel[vLogicIndex] := s;
-    vLogicColor[vLogicIndex] := ColorIndex;
-  end;
-  Inc(vLogicIndex);
 end;
 
 procedure TDebugDisplayForm.SetTrace(Path: integer; ModifyRate: boolean);
@@ -3144,7 +3160,8 @@ begin
     begin
       // Draw frame
       Bitmap[0].Canvas.Brush.Color := WinRGB(vGridColor);
-      Bitmap[0].Canvas.FrameRect(Rect(vMarginLeft - 1, vMarginTop - 1, vMarginLeft + vWidth + 1, vMarginTop + vHeight + 1));
+      Bitmap[0].Canvas.FrameRect(Rect(vMarginLeft, vMarginTop - ChrHeight shr 3 + 1,
+        vMarginLeft + vWidth + 1, vMarginTop + vHeight + ChrHeight shr 3 + 1));
       // Draw individual channel labels
       Bitmap[0].Canvas.Brush.Color := WinRGB(vBackColor);
       Bitmap[0].Canvas.Font.Style := [fsBold, fsItalic];
@@ -3152,7 +3169,7 @@ begin
       for i := 0 to vLogicIndex - 1 do
       begin
         x := vMarginLeft - (Length(vLogicLabel[i]) + 1) * ChrWidth;
-        Bitmap[0].Canvas.Font.Color := WinRGB(vColor[vLogicColor[i]]);
+        Bitmap[0].Canvas.Font.Color := WinRGB(vLogicColor[i]);
         Bitmap[0].Canvas.TextOut(x, y, vLogicLabel[i]);
         Dec(y, ChrHeight);
       end;
@@ -3172,8 +3189,8 @@ begin
           Bitmap[0].Canvas.Pen.Color := WinRGB(vBackColor);
           Bitmap[0].Canvas.Brush.Color := WinRGB(vGridColor);
         end;
-        x := vBitmapWidth - vMarginRight - vTriggerOffset * vSpacing - vSpacing div 2;
-        Bitmap[0].Canvas.MoveTo(x, vMarginTop);
+        x := vBitmapWidth - vMarginRight - vTriggerOffset * vSpacing;
+        Bitmap[0].Canvas.MoveTo(x, vMarginTop + 1);
         Bitmap[0].Canvas.LineTo(x, vMarginTop + vHeight);
         Bitmap[0].Canvas.Pen.Style := psSolid;
       end;
@@ -3182,9 +3199,10 @@ begin
     begin
       // Draw frame
       Bitmap[0].Canvas.Brush.Color := WinRGB(vGridColor);
-      Bitmap[0].Canvas.FrameRect(Rect(vMarginLeft - 1, vMarginTop - 1, vMarginLeft + vWidth + 1, vMarginTop + vHeight + 1));
+      Bitmap[0].Canvas.FrameRect(Rect(vMarginLeft - 1, vMarginTop - 1,
+        vMarginLeft + vWidth + 1, vMarginTop + vHeight + 1));
       // Draw gridlines
-      for i := 0 to TopChannel do if vGrid[i] <> 0 then
+      for i := 0 to Channels - 1 do if vGrid[i] <> 0 then
       begin
         color := AlphaBlend(vColor[i], vBackColor, $40);
         Bitmap[0].Canvas.Pen.Width := 1;
@@ -3264,7 +3282,7 @@ begin
       Bitmap[0].Canvas.Font.Style := [fsBold, fsItalic];
       x := vMarginLeft;
       y := ChrHeight div 2;
-      for i := 0 to TopChannel do if vLabel[i] <> '' then
+      for i := 0 to Channels - 1 do if vLabel[i] <> '' then
       begin
         w := Bitmap[0].Canvas.TextWidth(vLabel[i]);
         if x + w > vMarginLeft + vWidth then
@@ -3294,7 +3312,7 @@ begin
       Bitmap[0].Canvas.TextOut(vBitmapWidth div 2 + ChrWidth * 2, ChrHeight div 2, s);
       // Draw channel names
       Bitmap[0].Canvas.Font.Style := [fsBold, fsItalic];
-      for i := 0 to TopChannel do if vLabel[i] <> '' then
+      for i := 0 to Channels - 1 do if vLabel[i] <> '' then
       begin
         if (i and 2) = 0 then x := ChrWidth else x := vBitmapWidth - ChrWidth - Bitmap[0].Canvas.TextWidth(vLabel[i]);
         if i < 4 then y := ChrWidth else y := vBitmapHeight - ChrWidth - ChrHeight * 2;
@@ -3310,52 +3328,20 @@ end;
 function TDebugDisplayForm.AlphaBlend(a, b: integer; x: byte): integer;
 begin
   Result :=
-    // New gamma-corrected alpha blending
-    Round(Power((Power(a shr 16 and $FF, 2.0) * x + Power(b shr 16 and $FF, 2.0) * (255 - x)) / 256, 0.5)) shl 16 or
-    Round(Power((Power(a shr 08 and $FF, 2.0) * x + Power(b shr 08 and $FF, 2.0) * (255 - x)) / 256, 0.5)) shl 08 or
-    Round(Power((Power(a shr 00 and $FF, 2.0) * x + Power(b shr 00 and $FF, 2.0) * (255 - x)) / 256, 0.5)) shl 00;
-    // Old linear alpha blending
-{   (a shr 16 and $FF * x + b shr 16 and $FF * not x + $FF) shr 8 shl 16 or
-    (a shr 08 and $FF * x + b shr 08 and $FF * not x + $FF) shr 8 shl 08 or
-    (a shr 00 and $FF * x + b shr 00 and $FF * not x + $FF) shr 8 shl 00; }
+    // Gamma-corrected alpha blending
+    Round(Power((Power(a shr 16 and $FF, 2.0) * x + Power(b shr 16 and $FF, 2.0) * ($FF - x)) / $100, 0.5)) shl 16 or
+    Round(Power((Power(a shr 08 and $FF, 2.0) * x + Power(b shr 08 and $FF, 2.0) * ($FF - x)) / $100, 0.5)) shl 08 or
+    Round(Power((Power(a shr 00 and $FF, 2.0) * x + Power(b shr 00 and $FF, 2.0) * ($FF - x)) / $100, 0.5)) shl 00;
 end;
 
 procedure TDebugDisplayForm.DrawLineDot(x, y, color: integer; first: boolean);
 begin
-  if (vDotSize = 0) and (vLineSize > 0) then
-  begin         // line only
-    if first then
-    begin
-      vPixelX := x;
-      vPixelY := y;
-    end
-    else
-    begin
-      SmoothLine(vPixelX, vPixelY, x, y, vLineSize shl 6, color, $FF);
-      vPixelX := x;
-      vPixelY := y;
-    end;
-  end
-  else if (vDotSize > 0) and (vLineSize = 0) then
-  begin         // dot only
+  if (vLineSize > 0) and not first then
+    SmoothLine(vPixelX, vPixelY, x, y, vLineSize shl 6, color, $FF);
+  if (vDotSize > 0) then
     SmoothDot(x, y, vDotSize shl 7, color, $FF);
-  end
-  else
-  begin         // line and dot
-    if first then
-    begin
-      SmoothDot(x, y, vDotSize shl 7, color, $FF);
-      vPixelX := x;
-      vPixelY := y;
-    end
-    else
-    begin
-      SmoothLine(vPixelX, vPixelY, x, y, vLineSize shl 6, color, $FF);
-      SmoothDot(x, y, vDotSize shl 7, color, $FF);
-      vPixelX := x;
-      vPixelY := y;
-    end;
-  end;
+  vPixelX := x;
+  vPixelY := y;
 end;
 
 procedure TDebugDisplayForm.PlotPixel(p: integer);
@@ -3727,10 +3713,8 @@ begin
     dst := @PByteArray(BitmapLine[y])[x * 3];
     for i := 1 to (count + 1) * 3 do
     begin
-      // New gamma-corrected alpha blending
-      dst^ := Round(Power((Power(dst^, 2.0) * (255 - opacity) + Power(src^, 2.0) * opacity) / 256, 0.5));
-      // Old linear alpha blending
-{     dst^ := (dst^ * not opacity + src^ * opacity + $FF) shr 8; }
+      // Gamma-corrected alpha blending
+      dst^ := Round(Power((Power(dst^, 2.0) * ($FF - opacity) + Power(src^, 2.0) * opacity) / $100, 0.5));
       Inc(dst);
       Inc(src);
     end;
@@ -3753,14 +3737,10 @@ begin
   end
   else
   begin
-    // New gamma-corrected alpha blending
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 00 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 08 and $FF, 2.0) * opacity) / 256, 0.5)); Inc(p);
-    p^ := Round(Power((Power(p^, 2.0) * (255 - opacity) + Power(SmoothFillColor shr 16 and $FF, 2.0) * opacity) / 256, 0.5));
-    // Old linear alpha blending
-{   p^ := ((p^ * not opacity + (SmoothFillColor shr 00 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (SmoothFillColor shr 08 and $FF) * opacity) + $FF) shr 8; Inc(p);
-    p^ := ((p^ * not opacity + (SmoothFillColor shr 16 and $FF) * opacity) + $FF) shr 8; }
+    // Gamma-corrected alpha blending
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(SmoothFillColor shr 00 and $FF, 2.0) * opacity) / $100, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(SmoothFillColor shr 08 and $FF, 2.0) * opacity) / $100, 0.5)); Inc(p);
+    p^ := Round(Power((Power(p^, 2.0) * ($FF - opacity) + Power(SmoothFillColor shr 16 and $FF, 2.0) * opacity) / $100, 0.5));
   end;
 end;
 
@@ -3780,10 +3760,11 @@ const
   maxr = 128;
   limr = maxr + 1;
 var
-  radius1, span, dx, dy,
+  radius1, radius2, span, dx, dy,
   x1f, y1f, x2f, y2f, xleft, xright,
-  ym, slice, lt, lb, rt, rb, x, y,
+  slice, lt, lb, rt, rb, x, y,
   xp, yp, yl, yr, yt, yb, yn: integer;
+  yd, ym: int64;
   xo, yo: byte;
   th: extended;
   swapxy: boolean;
@@ -3839,8 +3820,8 @@ begin
   xleft := (x1 - radius1) and $FFFFFF00 + $80;
   xright := (x2 + radius1) and $FFFFFF00 + $80;
   // get angle metrics
-  dy := (y2 - y1) * $FFFF div (Max(x2 - x1, 1));             // get 16-bit slope, prevent divide-by-zero
-  ym := dy * (xleft - x1) div $100 + y1 * $100;              // get initial y with 16-bit fraction at x1
+  yd := Int64($10000) * (y2 - y1) div Max(x2 - x1, 1);       // get 16-bit slope, prevent divide-by-zero
+  ym := yd * (xleft - x1) div $100 + y1 * $100;              // get initial y with 16-bit fraction at x1
   th := ArcTan2(y2 - y1, x2 - x1);                           // get angle
   dx := Round(radius1 * Sin(th));                            // get semicircle departure/arrival points
   lt := x1 + dx;
@@ -3848,7 +3829,7 @@ begin
   rt := x2 + dx;
   rb := x2 - dx;
   slice := (radius1 * $10000) div Round(Cos(th) * $10000);   // get slice size
-  // draw complete line with left and right endpoint circles
+  // draw complete line with left and right endpoint semicircles
   x := xleft;
   while x <= xright do
   begin
@@ -3883,7 +3864,7 @@ begin
         SmoothPixel(swapxy, x shr 8, y2 shr 8 - yp, color, (xo * yo + $FF) shr 8, opacity)
       end;
     end
-    // between circles, draw 1D slice of line
+    // between semicircles, draw 1D slice of line
     else
     begin
       // get slice metrics
@@ -3912,7 +3893,7 @@ begin
     end;
     // step x and y
     Inc(x, $100);
-    Inc(ym, dy);
+    Inc(ym, yd);
   end;
 end;
 
@@ -4039,6 +4020,18 @@ end;
 //  Get Elements  //
 ////////////////////
 
+function TDebugDisplayForm.NextKeyIs(keyval: integer): boolean;
+begin
+  Result := False;
+  if NextElement(ele_key) then
+  begin
+    if val = keyval then
+      Result := True
+    else
+      Dec(ptr);
+  end;
+end;
+
 function TDebugDisplayForm.NextKey: boolean;
 begin
   Result := NextElement(ele_key);
@@ -4064,9 +4057,10 @@ begin
   if P2.DebugDisplayType[ptr] = Element then
   begin
     val := P2.DebugDisplayValue[ptr];
-    ptr := ptr + 1;
+    Inc(ptr);
     Result := True;
-  end else
+  end
+  else
     Result := False;
 end;
 
@@ -4192,3 +4186,4 @@ begin
 end;
 
 end.
+

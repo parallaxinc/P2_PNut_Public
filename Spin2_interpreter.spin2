@@ -1,7 +1,7 @@
 'TESTT add registers stack_start (on launch) and stack_max (on call or return) to track stack size for allocation need
 
 '******************************************
-'*  Spin2 Interpreter - v47 - 2025.01.03  *
+'*  Spin2 Interpreter - v49 - 2025.02.02  *
 '******************************************
 '
 CON	bc_setup_reg_1D8_1F8	= $B0

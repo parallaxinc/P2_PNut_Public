@@ -1,3 +1,5 @@
+{$MINSTACKSIZE $00400000}
+{$MAXSTACKSIZE $00400000}
 unit EditorUnit;
 
 interface
@@ -410,10 +412,10 @@ begin
       TopFilename := ExpandFilename(ParamStr(1));
     LoadEditorFile(TopFilename);
     //
-    // check for -D and -U preprocessor symbols
+    // check for -D preprocessor symbols
     //
-    // if ParamCount >= 2 and even then -xx command (filename -xx {-D|U symbol})
-    // if ParamCount >= 1 and odd then no command   (filename {-D|U symbol})
+    // if ParamCount >= 2 and even then -xx command (filename -xx {-D symbol})
+    // if ParamCount >= 1 and odd then no command   (filename {-D symbol})
     //
     cmd := (ParamCount >= 2) and
       ((ParamStr(2) = '-c' ) or
@@ -429,9 +431,9 @@ begin
     begin
       if cmd and (ParamCount > 2) then i := 3 else i := 2;
       repeat
-        if (ParamStr(i) = '-D') or (ParamStr(i) = '-U') then
+        if ParamStr(i) = '-D' then
         begin
-          if P2.PreSymbols = 32 then
+          if P2.PreSymbols = 16 then
           begin
             WriteErrorFile('too_many_preprocessor_symbols');
             ExitCode := 1;
@@ -473,7 +475,6 @@ begin
             p2.PreSymbolNames[P2.PreSymbols * 32 + c - 1] := Byte(s[c]);
           end;
           P2.PreSymbolNames[P2.PreSymbols * 32 + p] := 0;
-          P2.PreSymbolDefines[P2.PreSymbols] := (ParamStr(i) = '-D');
           Inc(P2.PreSymbols);
           Inc(i, 2);
         end
@@ -2460,11 +2461,12 @@ end;
 procedure TEditorForm.CompileRecursively(Filename: string; Level: integer; cObj, cList, cDoc: boolean);
 var
   i, j, p, s: integer;
+  match: boolean;
 
   Params: integer;
-  ParamNames: array[0..ParamLimit*32-1] of byte;
-  ParamTypes: array[0..ParamLimit-1] of byte;
-  ParamValues: array[0..ParamLimit-1] of integer;
+  ParamNames: array[0..ObjParamLimit*32-1] of byte;
+  ParamTypes: array[0..ObjParamLimit-1] of byte;
+  ParamValues: array[0..ObjParamLimit-1] of integer;
 
   ObjFiles: integer;
   ObjFilename: string;
@@ -2474,9 +2476,9 @@ var
   ObjFileIndex: array[0..FileLimit-1] of integer;
 
   ObjParams: array[0..FileLimit-1] of integer;
-  ObjParamNames: array[0..FileLimit*ParamLimit*32-1] of byte;
-  ObjParamTypes: array[0..FileLimit*ParamLimit-1] of byte;
-  ObjParamValues: array[0..FileLimit*ParamLimit-1] of integer;
+  ObjParamNames: array[0..FileLimit*ObjParamLimit*32-1] of byte;
+  ObjParamTypes: array[0..FileLimit*ObjParamLimit-1] of byte;
+  ObjParamValues: array[0..FileLimit*ObjParamLimit-1] of integer;
 
   ObjTitle: PChar;
 
@@ -2530,9 +2532,9 @@ begin
     begin
       // set sub-object's parameters
       P2.Params := ObjParams[i];
-      Move(ObjParamNames[i*ParamLimit*32], P2.ParamNames, ParamLimit*32);
-      Move(ObjParamTypes[i*ParamLimit], P2.ParamTypes, ParamLimit);
-      Move(ObjParamValues[i*ParamLimit], P2.ParamValues, ParamLimit*4);
+      Move(ObjParamNames[i*ObjParamLimit*32], P2.ParamNames, ObjParamLimit*32);
+      Move(ObjParamTypes[i*ObjParamLimit], P2.ParamTypes, ObjParamLimit);
+      Move(ObjParamValues[i*ObjParamLimit], P2.ParamValues, ObjParamLimit*4);
       // compile sub-object
       if (Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.spin2') then
         CompileRecursively(TopDir + ObjFilenames[i] + '.spin2', 1, cObjOff, cListOff, cDocOff)
@@ -2549,7 +2551,7 @@ begin
         CompilerError('Cannot find ' + ObjFilenames[i] + '.spin2');
       end;
       // get sub-object's obj file index
-      ObjFileIndex[i] := ObjFileCount - 1;
+      ObjFileIndex[i] := ObjFileLastIndex;      //ObjFileCount - 1;
     end;
     // restore current parameters
     P2.Params := Params;
@@ -2565,24 +2567,23 @@ begin
     LoadCompilerFile(Filename); //reload file because preprocessor (P2Compile0) modified it
     CompilerError(P2.ErrorMsg); //aborts
   end;
-  if p2.PreprocessorUsed then SaveFile(ChangeFileExt(Filename,'') + '_pre.spin2', Edit, EditLength);     // save post-preprocessor file
+  if p2.PreprocessorUsed then SaveFile(ChangeFileExt(Filename,'') + '__pre.spin2', Edit, EditLength);     // save post-preprocessor file
   P2Compile1;
   if P2.Error then CompilerError(P2.ErrorMsg); //aborts if error
-  // load sub-objects' .obj files
-  p := 0;
+  // load any sub-objects' .obj files
   if ObjFiles > 0 then
+  begin
     for i := 0 to ObjFiles-1 do
     begin
       j := ObjFileIndex[i];
-      s := ObjFileLength[j];
-      Move(ObjFileBuff[ObjFileOffset[j]], P2.ObjData[p], s);
-      P2.ObjOffsets[i] := p;
-      P2.ObjLengths[i] := s;
-      p := p + s;
+      P2.ObjOffsets[i] := ObjFileOffsets[j];
+      P2.ObjLengths[i] := ObjFileLengths[j];
     end;
+  end;
   // load any data files
-  p := 0;
   if DatFiles > 0 then
+  begin
+    p := 0;
     for i := 0 to DatFiles-1 do
     begin
       DatFilename := PChar(@P2.DatFilenames[i shl 8]);
@@ -2606,19 +2607,43 @@ begin
         CloseFile(f);
       end;
     end;
+  end;
   // perform second pass of compilation
   ObjTitle := @P2.ObjTitle;
   StrCopy(ObjTitle, PChar(ExtractFilename(Filename)));
   P2Compile2;
   if P2.Error then CompilerError(P2.ErrorMsg); //aborts if error
-  // Save obj file into memory
-  if ObjFilePtr + P2.ObjLength > ObjLimit then
-    CompilerError('OBJ data exceeds ' + IntToStr(ObjLimit div 1024) + 'k limit');
-  Move(P2.Obj, ObjFileBuff[ObjFilePtr], P2.ObjLength);
-  ObjFileOffset[ObjFileCount] := ObjFilePtr;
-  ObjFileLength[ObjFileCount] := P2.ObjLength;
-  Inc(ObjFilePtr, P2.ObjLength);
-  Inc(ObjFileCount);
+  // save obj file into memory if a copy doesn't already exist
+  if ObjFileCount = ObjFileLimit then
+    CompilerError('Limit of ' + IntToStr(ObjFileLimit) + ' object files exceeded');
+  match := false;
+  if (ObjFileCount > 0) and (P2.ObjLength > 0) then
+  begin
+    for i := 0 to ObjFileCount-1 do
+    begin
+      if ObjFileLengths[i] = P2.ObjLength then
+      begin
+        if CompareMem(@P2.ObjData[ObjFileOffsets[i]], @P2.Obj, P2.ObjLength) then
+        begin
+          match := True;
+          ObjFileLastIndex := i;
+          //MessageDlg('Matched object #' + IntToStr(ObjFileCount) + ' with #' + IntToStr(i), mtError, [mbOK], 0);
+          Break;
+        end;
+      end;
+    end;
+  end;
+  if not match then
+  begin
+    if ObjFilePtr + P2.ObjLength > ObjDataLimit then
+      CompilerError('OBJ data exceeds ' + IntToStr(ObjDataLimit div 1024) + 'k limit');
+    Move(P2.Obj, P2.ObjData[ObjFilePtr], P2.ObjLength);
+    ObjFileOffsets[ObjFileCount] := ObjFilePtr;
+    ObjFileLengths[ObjFileCount] := P2.ObjLength;
+    ObjFileLastIndex := ObjFileCount;
+    Inc(ObjFilePtr, P2.ObjLength);
+    Inc(ObjFileCount);
+  end;
   // save obj/list/doc file(s), only happens at top level
   if cList then SaveFile(ExtFilename(CurrentFilename, 'lst'), P2.List, P2.ListLength);
   if cDoc then SaveFile(ExtFilename(CurrentFilename, 'txt'), P2.Doc, P2.DocLength);
