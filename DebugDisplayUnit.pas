@@ -83,46 +83,48 @@ const
   key_clear             = 48;
   key_close             = 49;
   key_color             = 50;
-  key_depth             = 51;
-  key_dot               = 52;
-  key_dotsize           = 53;
-  key_hidexy            = 54;
-  key_holdoff           = 55;
-  key_line              = 56;
-  key_linesize          = 57;
-  key_logscale          = 58;
-  key_lutcolors         = 59;
-  key_mag               = 60;
-  key_obox              = 61;
-  key_opacity           = 62;
-  key_origin            = 63;
-  key_oval              = 64;
-  key_pc_key            = 65;
-  key_pc_mouse          = 66;
-  key_polar             = 67;
-  key_pos               = 68;
-  key_precise           = 69;
-  key_range             = 70;
-  key_rate              = 71;
-  key_samples           = 72;
-  key_save              = 73;
-  key_scroll            = 74;
-  key_set               = 75;
-  key_signed            = 76;
-  key_size              = 77;
-  key_spacing           = 78;
-  key_sparse            = 79;
-  key_sprite            = 80;
-  key_spritedef         = 81;
-  key_text              = 82;
-  key_textangle         = 83;
-  key_textsize          = 84;
-  key_textstyle         = 85;
-  key_title             = 86;
-  key_trace             = 87;
-  key_trigger           = 88;
-  key_update            = 89;
-  key_window            = 90;
+  key_crop              = 51;
+  key_depth             = 52;
+  key_dot               = 53;
+  key_dotsize           = 54;
+  key_hidexy            = 55;
+  key_holdoff           = 56;
+  key_layer             = 57;
+  key_line              = 58;
+  key_linesize          = 59;
+  key_logscale          = 60;
+  key_lutcolors         = 61;
+  key_mag               = 62;
+  key_obox              = 63;
+  key_opacity           = 64;
+  key_origin            = 65;
+  key_oval              = 66;
+  key_pc_key            = 67;
+  key_pc_mouse          = 68;
+  key_polar             = 69;
+  key_pos               = 70;
+  key_precise           = 71;
+  key_range             = 72;
+  key_rate              = 73;
+  key_samples           = 74;
+  key_save              = 75;
+  key_scroll            = 76;
+  key_set               = 77;
+  key_signed            = 78;
+  key_size              = 79;
+  key_spacing           = 80;
+  key_sparse            = 81;
+  key_sprite            = 82;
+  key_spritedef         = 83;
+  key_text              = 84;
+  key_textangle         = 85;
+  key_textsize          = 86;
+  key_textstyle         = 87;
+  key_title             = 88;
+  key_trace             = 89;
+  key_trigger           = 90;
+  key_update            = 91;
+  key_window            = 92;
 
   TypeName              : array [dis_logic..dis_midi] of string = (
                           'LOGIC',
@@ -217,6 +219,7 @@ const
   plot_wmax             = SmoothFillMax;
   plot_hmin             = 32;
   plot_hmax             = SmoothFillMax;
+  plot_layermax         = 8;
 
   term_colmin           = 1;
   term_colmax           = 256;
@@ -361,6 +364,8 @@ private
 
   PolarColors           : array [0..255] of integer;
 
+  PlotBitmap            : array [0..plot_layermax - 1] of TBitmap;
+
   MidiSize              : integer;
   MidiKeySize           : integer;
   MidiKeyFirst          : integer;
@@ -447,6 +452,7 @@ published
   procedure PLOT_Configure;
   procedure PLOT_Update;
   procedure PLOT_GetXY(var x, y: integer);
+  procedure PLOT_Close;
 
   procedure TERM_Configure;
   procedure TERM_Update;
@@ -466,6 +472,7 @@ published
   function  KeyValWithin(var v: integer; bottom, top: integer): boolean;
   procedure KeyPos;
   procedure KeySize(var x, y: integer; wmin, wmax, hmin, hmax: integer);
+  function  KeyIs(keyval: integer): boolean;
   procedure KeyTwoPi;
   function  KeyColor(var c: integer): boolean;
   procedure KeyColorMode;
@@ -511,7 +518,6 @@ published
   function  SmoothClip(var x1, y1, x2, y2: integer): boolean;
   function  SmoothClipTest(x, y, lft, rgt, bot, top: integer): integer;
 
-  function  NextKeyIs(keyval: integer): boolean;
   function  NextKey: boolean;
   function  NextNum: boolean;
   function  NextStr: boolean;
@@ -583,6 +589,8 @@ begin
 end;
 
 procedure TDebugDisplayForm.FormCreate(Sender: TObject);
+var
+  i: integer;
 begin
   // Set up display bitmaps
   Bitmap[0] := TBitmap.Create;
@@ -861,6 +869,8 @@ begin
 end;
 
 procedure TDebugDisplayForm.FormDestroy(Sender: TObject);
+var
+  i: integer;
 begin
   Bitmap[0].Free;
   Bitmap[1].Free;
@@ -868,6 +878,17 @@ begin
   CursorMask.Free;
   ReleaseDC(GetDesktopWindow, DesktopDC);
   DesktopBitmap.Free;
+  case DisplayType of
+//  dis_logic           : LOGIC_Close;
+//  dis_scope           : SCOPE_Close;
+//  dis_scope_xy        : SCOPE_XY_Close;
+//  dis_fft             : FFT_Close;
+//  dis_spectro         : SPECTRO_Close;
+    dis_plot            : PLOT_Close;
+//  dis_term            : TERM_Close;
+//  dis_bitmap          : BITMAP_Close;
+//  dis_midi            : MIDI_Close;
+  end;
 end;
 
 
@@ -956,7 +977,7 @@ begin
         vLogicLabel[vLogicIndex] := s;
         if not KeyValWithin(v, 1, LogicChannels) then v := 1;
         MaxLimit(v, LogicChannels - vLogicIndex);
-        isRange := NextKeyIs(key_range);
+        isRange := KeyIs(key_range);
         if not KeyColor(color) then color := DefaultScopeColors[vLogicIndex mod 8];
         for i := 0 to v - 1 do
         begin
@@ -1197,7 +1218,7 @@ begin
     begin
       if vIndex <> Channels then Inc(vIndex);
       vLabel[vIndex - 1] := PChar(val);
-      if NextKeyIs(key_auto) then
+      if KeyIs(key_auto) then
         vAuto[vIndex - 1] := True
       else
       begin
@@ -1216,7 +1237,7 @@ begin
       begin
         vArmed := False;
         if not KeyValWithin(vTriggerChannel, -1, 7) then Continue;
-        if NextKeyIs(key_auto) then
+        if KeyIs(key_auto) then
           vTriggerAuto := True
         else
         begin
@@ -1841,6 +1862,8 @@ end;
 ////////////
 
 procedure TDebugDisplayForm.PLOT_Configure;
+var
+  i: integer;
 begin
   // Set unique defaults
   vDirX := False;
@@ -1881,6 +1904,8 @@ begin
     key_hidexy:                                       // HIDEXY
       vHideXY := True;
   end;
+  // Set up layer bitmaps
+  for i := 0 to plot_layermax - 1 do PlotBitmap[i] := TBitmap.Create;
   // Clear sprite data
   FillChar(SpritePixels, SizeOf(SpritePixels), 0);
   FillChar(SpriteColors, SizeOf(SpriteColors), 0);
@@ -2028,6 +2053,40 @@ begin
       PLOT_GetXY(t1, t2);
       AngleTextOut(t1, t2, s, a[1], a[2]);
     end;
+    key_layer:                                        // LAYER layer 'filename.bmp'
+    begin
+      if not KeyValWithin(t1, 1, plot_layermax) then Break;
+      if not NextStr then Break;
+      if not (FileExists(pChar(val)) and (ExtractFileExt(pChar(val)) = '.bmp')) then Break;
+      PlotBitmap[t1 - 1].LoadFromFile(PChar(val));
+    end;
+    key_crop:                                         // CROP layer {left top width height {x y}}
+    begin                                             // CROP layer AUTO x y
+      if not KeyValWithin(t1, 1, plot_layermax) then Break;
+      t2 := 0;              // layer-bitmap source coordinates
+      t3 := 0;
+      t4 := PlotBitmap[t1 - 1].Width;
+      t5 := PlotBitmap[t1 - 1].Height;
+      t6 := 0;              // plot-bitmap destination coordinates
+      t7 := 0;
+      if KeyIs(key_auto) then
+      begin
+        if not KeyValWithin(t6, 0, vBitMapWidth) then Break;
+        if not KeyValWithin(t7, 0, vBitmapHeight) then Break;
+      end
+      else
+      if KeyValWithin(t2, 0, PlotBitmap[t1 - 1].Width) then
+      begin
+        if not KeyValWithin(t3, 0, PlotBitmap[t1 - 1].Height) then Break;
+        if not KeyValWithin(t4, 0, PlotBitmap[t1 - 1].Width) then Break;
+        if not KeyValWithin(t5, 0, PlotBitmap[t1 - 1].Height) then Break;
+        t6 := t2;
+        t7 := t3;
+        if KeyValWithin(t6, 0, vBitMapWidth) then
+          if not KeyValWithin(t7, 0, vBitMapHeight) then Break;
+      end;
+      Bitmap[0].Canvas.CopyRect(Rect(t6, t7, t6 + t4, t7 + t5), PlotBitmap[t1 - 1].Canvas, Rect(t2, t3, t2 + t4, t3 + t5));
+    end;
     key_spritedef:                                    // SPRITEDEF id xsize ysize pixels... colors...
     begin
       if not KeyValWithin(t1, 0, SpriteMax - 1) then Break;
@@ -2105,6 +2164,13 @@ begin
     y := vOffsetY + vPixelY
   else
     y := vHeight - 1 - vOffsetY - vPixelY;
+end;
+
+procedure TDebugDisplayForm.PLOT_Close;
+var
+  i: integer;
+begin
+  for i := 0 to plot_layermax - 1 do PlotBitmap[i].Free;
 end;
 
 
@@ -2645,6 +2711,18 @@ procedure TDebugDisplayForm.KeySize(var x, y: integer; wmin, wmax, hmin, hmax: i
 begin
   if KeyValWithin(x, wmin, wmax) then
     KeyValWithin(y, hmin, hmax);
+end;
+
+function TDebugDisplayForm.KeyIs(keyval: integer): boolean;
+begin
+  Result := False;
+  if NextKey then
+  begin
+    if val = keyval then
+      Result := True
+    else
+      Dec(ptr);
+  end;
 end;
 
 procedure TDebugDisplayForm.KeyTwoPi;
@@ -4019,18 +4097,6 @@ end;
 ////////////////////
 //  Get Elements  //
 ////////////////////
-
-function TDebugDisplayForm.NextKeyIs(keyval: integer): boolean;
-begin
-  Result := False;
-  if NextElement(ele_key) then
-  begin
-    if val = keyval then
-      Result := True
-    else
-      Dec(ptr);
-  end;
-end;
 
 function TDebugDisplayForm.NextKey: boolean;
 begin

@@ -1,6 +1,6 @@
 object DebugForm: TDebugForm
-  Left = 3
-  Top = 2208
+  Left = 5
+  Top = 2183
   Anchors = []
   AutoScroll = False
   BorderIcons = [biSystemMenu, biMaximize]

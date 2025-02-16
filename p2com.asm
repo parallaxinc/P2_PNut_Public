@@ -1,21 +1,13 @@
-; allow IF_C, etc before PASM DEBUG by assembling IF_C SKIP #1 instruction in front of the BRK instrution
-; ADDPINS/ADDBITS only allowed in PASM under #immediate expression
-; Allow INA/INB/etc to be used in CON expressions as register values
-
-
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v49		*
+;*	       Spin2 Compiler v50		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2025 by Parallax, Inc.	*
-;*	    Last Updated: 2025/02/02		*
+;*	    Last Updated: 2025/02/15		*
 ;*						*
 ;************************************************
-;
-; Version 0.0	- Adapted from SXASM v1.01
-;	  0.1	- Added Propeller II instructions
-;
+
 			ideal
 			p386
 			model	flat
@@ -40,7 +32,7 @@
 ;
 ; Equates
 ;
-spin2_version		=	47
+spin2_version		=	50
 
 obj_limit		=	100000h		;must be same in delphi
 obj_data_limit		=	200000h		;must be same in delphi
@@ -664,6 +656,7 @@ count		type_back		;	\
 count		type_under		;	_
 count		type_tick		;	`
 count		type_dollar		;	$ (without a hex digit following)
+count		type_dollar2		;	$$
 count		type_percent		;	% (without a bin digit or quote following)
 count		type_dot		;	.
 count		type_dotdot		;	..
@@ -1104,7 +1097,7 @@ count2		bc_clkset
 count2		bc_read_clkfreq
 count2		bc_cogspin
 count2		bc_cogchk
-count2		bc_inline
+count2		bc_org
 count2		bc_regexec
 count2		bc_regload
 count2		bc_call
@@ -1165,6 +1158,8 @@ count2		bc_taskhalt
 count2		bc_taskcont
 count2		bc_taskchk
 count2		bc_taskid
+count2		bc_task_return
+count2		bc_orgh
 ;
 ;
 ; Flex codes
@@ -1463,6 +1458,7 @@ count		dir_org
 count		dir_orgf
 count		dir_res
 count		dir_fit
+count		dir_ditto
 ;
 ;
 ; Ifs
@@ -2024,6 +2020,9 @@ error_csmbla:	call	set_error
 error_dbz:	call	set_error
 		db	'Divide by zero',0
 
+error_dcmbapi:	call	set_error
+		db	'DITTO count must be a positive integer or zero',0
+
 error_ddcobd:	call	set_error
 		db	'DEBUG_DISABLE can only be defined as an integer constant',0
 
@@ -2050,6 +2049,12 @@ error_debugbaud:call	set_error
 
 error_debugclk:	call	set_error
 		db	'DEBUG requires at least 10 MHz of crystal/external clocking',0
+
+error_dioa:	call	set_error
+		db	'"$" (DAT origin) is only allowed in DAT blocks',0
+
+error_diioa:	call	set_error
+		db	'"$$" (DITTO index) is only allowed within a DITTO section, inside a DAT block',0
 
 error_divo:	call	set_error
 		db	'Division overflow',0
@@ -2192,6 +2197,9 @@ error_ecomma:	call	set_error
 error_ecor:	call	set_error
 		db	'Expected "," or ")"',0
 
+error_edend:	call	set_error
+		db	'Expected DITTO END',0
+
 error_edot:	call	set_error
 		db	'Expected "."',0
 
@@ -2270,6 +2278,9 @@ error_erightb:	call	set_error
 error_es:	call	set_error
 		db	'Empty string',0
 
+error_esc:	call	set_error
+		db	"Expected a string character",0
+
 error_esendd:	call	set_error
 		db	'Expected SEND data',0
 
@@ -2339,6 +2350,9 @@ error_icce:	call	set_error
 error_idbn:	call	set_error
 		db	'Invalid double-binary number',0
 
+error_iec:	call	set_error
+		db	'Invalid escape character',0
+
 error_idfnf:	call	set_error
 		db	'Internal DAT file not found',0
 
@@ -2361,7 +2375,10 @@ error_iscexb:	call	set_error
 		db	"Indexed structures cannot exceed $FFFF bytes in size",0
 
 error_isie:	call	set_error
-		db	'Inline section is empty',0
+		db	'ORG/ORGH inline section is empty',0
+
+error_isil:	call	set_error
+		db	'ORGH inline section exceeds $FFFF longs (including the added RET instruction)',0
 
 error_level44:	call	set_error
 		db	'{Spin2_v44} is no longer supported due to changes in data structures beginning in v45',0
@@ -2447,11 +2464,11 @@ error_ocmbf1tx:	call	set_error
 error_odo:	call	set_error
 		db	'Object distiller overflow',0
 
+error_ohnawads:	call	set_error
+		db	'ORGH not allowed within a DITTO section',0
+
 error_ohnawiac:	call	set_error
 		db	'ORGH not allowed within inline assembly code',0
-
-error_oinah:	call	set_error
-		db	'"$" is not allowed here',0
 
 error_oinaiom:	call	set_error
 		db	'ORGF is not allowed in ORGH mode',0
@@ -2467,6 +2484,9 @@ error_oaocbats:	call	set_error
 
 error_oiina:	call	set_error
 		db	'Object index is not allowed before constants and structures',0
+
+error_onawads:	call	set_error
+		db	'ORG not allowed within a DITTO section',0
 
 error_onawiac:	call	set_error
 		db	'ORG not allowed within inline assembly code',0
@@ -2512,9 +2532,6 @@ error_rcex:	call	set_error
 
 error_recvcbu:	call	set_error
 		db	'RECV() can be used only as a term and \RECV() is not allowed',0
-
-error_riabd:	call	set_error
-		db	'_RET_ is allowed before DEBUG, but not a condition',0
 
 error_rinah:	call	set_error
 		db	'Register is not allowed here',0
@@ -2675,6 +2692,29 @@ error_inspect_symbol:
 		jmp	abort
 ;
 ;
+; Make an error message to show ebx - just for development
+;
+error_inspect_value:
+
+		push	ebx
+
+		mov	[print_length],0
+
+		call	print_string
+		db	'Value: ',0
+
+		pop	eax
+		call	print_long
+
+		mov	al,0
+		call	print_chr
+
+		push	[list]
+		pop	[error_msg]
+
+		jmp	abort
+;
+;
 ;************************************************************************
 ;*  Compiler								*
 ;************************************************************************
@@ -2734,6 +2774,7 @@ _compile1:	mov	[error],1		;init error to true
 		call	reset_symbols_local	;reset local symbols
 		call	reset_symbols_inline	;reset inline symbols
 		call	write_symbols_main	;write main symbols
+		mov	[con_block_flag],0	;reset con block flag
 		mov	[asm_local],30303030h	;reset asm local to '0000'
 		mov	[pubcon_list_size],0	;reset pub/con list
 		mov	[list_length],0		;reset list length
@@ -2889,6 +2930,8 @@ compile_done:	mov	[source_start],0	;reset source pointers
 ;
 ; Data
 ;
+dbx		con_block_flag
+
 ddx		struct_id_next
 ddx		struct_id_to_def,struct_id_limit
 ddx		struct_def_ptr
@@ -3095,7 +3138,7 @@ print_symbol2:	push	eax
 @@symchr:	lodsb
 		cmp	al,0
 		je	@@symdone
-		cmp	al,'0'
+		cmp	al,' '
 		jb	@@symspcl
 		call	print_chr
 		jmp	@@symchr
@@ -3715,6 +3758,8 @@ compile_con_blocks_2nd:
 
 compile_con_blocks:
 
+		mov	[con_block_flag],1	;enable register addresses as constants
+
 		mov	[@@pass],al		;set pass
 
 		call	reset_element		;reset element
@@ -3911,7 +3956,8 @@ compile_con_blocks:
 		call	get_element		;comma, get next element, sameline
 		jmp	@@sameline
 
-@@done:		ret
+@@done:		mov	[con_block_flag],0	;inhibit register addresses from being used as constants
+		ret
 
 
 @@checkparam:	push	ebx			;if symbol is a parameter, substitute the parameter value
@@ -4616,17 +4662,23 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		mov	[hub_org],00000h	;reset hub org
 		mov	[hub_org_limit],100000h	;reset hub org limit
 
+		mov	[ditto_flag],0		;reset DITTO flag
+
 		mov	[@@size],0		;reset size to byte
 
 		cmp	[inline_flag],1		;block or inline mode?
 		jne	@@passblock
 
-		mov	[orgh],0		;inline mode, start in org mode
-		push	[inline_cog_org]	;reset cog org
-		pop	[cog_org]
-		push	[inline_cog_org_limit]	;reset cog org limit
-		pop	[cog_org_limit]
-		mov	eax,[@@sourceptr]	;reset source_ptr
+		mov	eax,[inline_cog_org]		;inline mode, reset cog org
+		mov	[cog_org],eax
+		mov	eax,[inline_cog_org_limit]	;reset cog org limit
+		mov	[cog_org_limit],eax
+		mov	eax,00400h			;reset hub org
+		mov	[hub_org],eax
+		sub	eax,[obj_ptr]			;set orgh_offset
+		mov	[orgh_offset],eax
+		mov	[hub_org_limit],100000h		;reset hub org limit
+		mov	eax,[@@sourceptr]		;reset source_ptr
 		mov	[source_ptr],eax
 		jmp	@@passprep
 
@@ -4731,17 +4783,23 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		cmp	al,type_block		;block?
 		jne	error_eaunbwlo
 		call	back_element		;yes, back up
+		cmp	[ditto_flag],1		;make sure DITTO block not left open
+		je	error_edend
 		call	@@enterinfo		;enter info
 		jmp	@@nextblock		;continue scan for next dat block
 
 @@inlinechk:	cmp	al,type_asm_end		;inline, must be 'end'
 		jne	error_eidbwloe
+		cmp	[ditto_flag],1		;make sure DITTO block not left open
+		je	error_edend
 		mov	ecx,0FD64002Dh		;enter RET instruction
 		call	@@enterlong
 		jmp	@@passdone
 
 @@eof:		cmp	[inline_flag],1		;eof, error if inline mode
 		je	error_eend
+		cmp	[ditto_flag],1		;make sure DITTO block not left open
+		je	error_edend
 
 @@passdone:	call	@@enterinfo		;enter any info
 		inc	[@@pass]		;next pass
@@ -4838,9 +4896,10 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	@@nextline		;next line
 
 
-@@dir:		mov	[@@size],2		;assembly directive, set long size
-
-		cmp	bl,dir_fit		;handle directive
+@@dir:		mov	[@@size],2		;set long size
+		cmp	bl,dir_ditto		;handle directive
+		je	@@dirditto
+		cmp	bl,dir_fit
 		je	@@dirfit
 		cmp	bl,dir_res
 		je	@@dirres
@@ -4853,8 +4912,10 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		cmp	bl,dir_alignl
 		je	@@diralignl
 
-		cmp	[inline_flag],1		;orgh, make sure not inline mode
+		cmp	[inline_flag],1		;ORGH, make sure not inline mode
 		je	error_ohnawiac
+		cmp	[ditto_flag],1		;make sure not in a DITTO section
+		je	error_ohnawads
 		mov	[orgh],1		;set orgh mode
 		call	@@nosymbol		;make sure no symbol
 		call	get_element		;preview next element
@@ -4902,7 +4963,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 @@dirorghs:	call	get_end
 		jmp	@@nextline
 
-@@diralignw:	mov	ebx,01h			;align, get factor
+@@diralignw:	mov	ebx,01h			;ALIGN, get factor
 		jmp	@@diralign
 @@diralignl:	mov	ebx,03h
 @@diralign:	cmp	[inline_flag],1		;make sure not inline mode
@@ -4919,8 +4980,10 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 @@diralignx:	call	get_end
 		jmp	@@nextline
 
-@@dirorg:	cmp	[inline_flag],1		;org, make sure not inline mode
+@@dirorg:	cmp	[inline_flag],1		;ORG, make sure not inline mode
 		je	error_onawiac
+		cmp	[ditto_flag],1		;make sure not in a DITTO section
+		je	error_onawads
 		call	@@nosymbol		;make sure no symbol
 		call	get_element		;preview next element
 		call	back_element
@@ -4953,7 +5016,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		call	get_end
 		jmp	@@nextline
 
-@@dirorgf:	cmp	[orgh],0		;orgf, not allowed in orgh mode
+@@dirorgf:	cmp	[orgh],0		;ORGF, not allowed in orgh mode
 		jne	error_oinaiom
 		call	@@nosymbol		;make sure no symbol
 		call	@@getvalueint		;get value and end of line
@@ -4970,7 +5033,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		call	@@enter
 		jmp	@@nextline
 
-@@dirres:	cmp	[orgh],0		;res, not allowed in orgh mode
+@@dirres:	cmp	[orgh],0		;RES, not allowed in orgh mode
 		jne	error_rinaiom
 		call	@@coglong		;advance to next cog long
 		or	edx,40000000h		;set res symbol flag
@@ -4987,7 +5050,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	@@nextline
 
 
-@@dirfit:	call	@@nosymbol		;fit, make sure no symbol
+@@dirfit:	call	@@nosymbol		;FIT, make sure no symbol
 		call	@@getvalueint		;get fit limit
 		cmp	[orgh],1		;handle hub/cog
 		jne	@@fitcog
@@ -4998,6 +5061,45 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		cmp	[cog_org],ebx
 		ja	error_caefl		;limit exceeded?
 @@fitdone:	call	get_end
+		jmp	@@nextline
+
+
+@@dirditto:	cmp	[ditto_flag],1		;DITTO, already active?
+		je	@@dittoactive
+
+		call	@@entersymbol		;new, enter any symbol
+		call	@@getvalueint		;get count
+		cmp	ebx,0			;must be >= 0
+		jl	error_dcmbapi
+		call	get_end
+		mov	[ditto_flag],1		;set parameters
+		mov	[ditto_index],0
+		mov	[ditto_count],ebx
+		mov	eax,[source_ptr]
+		mov	[ditto_source_ptr],eax
+		mov	eax,[obj_ptr]
+		mov	[ditto_obj_ptr],eax
+		jmp	@@nextline
+
+@@dittoactive:	call	get_element		;active, get END
+		cmp	al,type_asm_end
+		jne	error_eend
+		call	get_end
+		cmp	[ditto_count],0		;zero count?
+		je	@@dittozero
+		inc	[ditto_index]		;inc index and check if count reached
+		mov	eax,[ditto_index]
+		cmp	eax,[ditto_count]
+		je	@@dittodone
+		mov	eax,[ditto_source_ptr]	;count not reached, repoint to body of block
+		mov	[source_ptr],eax
+		jmp	@@nextline
+
+@@dittozero:	mov	eax,[ditto_obj_ptr]	;zero count, restore obj_ptr
+		mov	[obj_ptr],eax
+
+@@dittodone:	mov	[ditto_flag],0		;done, cancel flag and carry on
+		call	@@entersymbol		;enter any symbol
 		jmp	@@nextline
 
 
@@ -5585,19 +5687,25 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		ret
 
 
-@@op_debug:	mov	eax,ecx			;DEBUG, _ret_ is okay, but condition is not allowed
-		shr	eax,32-4
-		jz	@@debugretok
-		cmp	al,0Fh
-		jne	error_riabd
-@@debugretok:
-		call	check_debug		;if debug disabled, ignore rest of line and emit nothing
+@@op_debug:	call	check_debug		;DEBUG, if disabled, ignore rest of line and emit nothing
 		je	@@debugon
 		call	scan_to_end		;scan to end of line
 		call	get_end			;get end
 		pop	eax			;pop return address so no long is emitted
 		jmp	@@nextline		;get next line
 @@debugon:
+		mov	eax,ecx			;get condition
+		shr	eax,32-4		;_ret_ is okay
+		jz	@@debugok
+		cmp	al,0Fh			;<always> condition is okay
+		je	@@debugok
+		push	ecx			;some other condition, assemble a SKIP #1 before the BRK instruction
+		and	ecx,0F0000000h		;isolate condition
+		xor	ecx,0FD640231h		;make IF_<opposite> SKIP #1 instruction
+		call	@@enterlong		;enter instruction
+		pop	ecx
+		or	ecx,0F0000000h		;set BRK condition to <always>
+@@debugok:
 		call	check_left		;check for '('
 		je	@@debugleft
 
@@ -6258,6 +6366,12 @@ ddx		cog_org
 ddx		cog_org_limit
 ddx		hub_org
 ddx		hub_org_limit
+
+dbx		ditto_flag
+ddx		ditto_index
+ddx		ditto_count
+ddx		ditto_source_ptr
+ddx		ditto_obj_ptr
 ;
 ;
 ; Compile sub blocks
@@ -8426,10 +8540,13 @@ get_element:	push	ecx
 		call	@@setptrs
 		jmp	error_idbn
 
-@@hex:		lodsb				;$ hex or $
+@@hex:		lodsb				;$ hex or $ or $$
 		mov	cl,16
 		call	check_digit
 		jnc	@@con
+		cmp	[byte esi-1],'$'
+		mov	al,type_dollar2
+		je	@@got
 		dec	esi
 		mov	al,type_dollar
 		jmp	@@got
@@ -9285,7 +9402,7 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		cmp	al,type_dollar		;allow origin ($) if operand
 		jne	@@notorg
 		test	[exp_flags],10b
-		jz	error_oinah
+		jz	error_dioa
 		call	@@checkint
 		cmp	[orgh],0		;return hub or cog origin
 		mov	ebx,[hub_org]
@@ -9294,11 +9411,22 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		shr	ebx,2
 		jmp	@@okay
 @@notorg:
-		cmp	al,type_register	;allow register if operand
+		cmp	al,type_dollar2		;allow DITTO index ($$) if operand
+		jne	@@notditto
+		test	[exp_flags],10b
+		jz	error_diioa
+		cmp	[ditto_flag],0
+		je	error_diioa
+		mov	ebx,[ditto_index]
+		jmp	@@okay
+@@notditto:
+		cmp	al,type_register	;allow register if operand or CON block
 		jne	@@notreg
+		cmp	[con_block_flag],1
+		je	@@regokay
 		test	[exp_flags],10b
 		jz	error_rinah
-		call	@@checkint
+@@regokay:	call	@@checkint
 		jmp	@@okay
 @@notreg:
 		cmp	[inline_flag],1		;if inline-assembly mode, remap local longs
@@ -11561,8 +11689,10 @@ compile_instruction:
 @@notflex:
 		cmp	al,type_asm_dir		;inline assembly?
 		jne	@@notinline
-		cmp	bl,dir_org
-		je	compile_inline
+		cmp	bl,dir_org		;ORG?
+		je	compile_org
+		cmp	bl,dir_orgh		;ORGH?
+		je	compile_orgh
 @@notinline:
 		cmp	al,type_inc		;++var ?
 		mov	dh,bc_var_inc		;(assign pre-inc)
@@ -11879,9 +12009,9 @@ ci_send:	call	get_left		;get '('
 		ret
 ;
 ;
-; Compile inline assembly section - first handle ORG operand(s)
+; Compile ORG inline assembly section - first handle ORG operand(s)
 ;
-compile_inline:	mov	ecx,000h		;ready default cog origin
+compile_org:	mov	ecx,000h		;ready default cog origin
 		mov	edx,inline_limit	;ready default cog origin limit
 		call	check_end		;if end, use defaults
 		je	@@org
@@ -11895,26 +12025,27 @@ compile_inline:	mov	ecx,000h		;ready default cog origin
 		cmp	ebx,inline_limit
 		ja	error_icaexl
 		mov	edx,ebx
-@@orgend:	call	get_end			;get_end
+@@orgend:	call	get_end			;get end
 @@org:
-		mov	al,bc_hub_bytecode	;enter 'inline pasm' bytecodes
+		mov	al,bc_hub_bytecode	;enter ORGH bytecodes
 		call	enter_obj
-		mov	al,bc_inline
+		mov	al,bc_org
 		call	enter_obj
 
 		mov	ax,cx			;enter origin
 		call	enter_obj_word
 
-		mov	ax,0			;enter placeholder for number of longs
+		mov	ax,0			;enter placeholder for number of longs, minus 1
 		call	enter_obj_word
 
 		push	[obj_ptr]		;remember obj_ptr
 
-		shl	ecx,2			;store inline cog origin and limit
+		shl	ecx,2			;set inline cog origin and limit
 		mov	[inline_cog_org],ecx
 		shl	edx,2
 		mov	[inline_cog_org_limit],edx
 
+		mov	[orgh],0		;set org mode
 		call	compile_inline_section	;compile inline section
 
 		pop	ebx			;get original obj_ptr
@@ -11933,8 +12064,51 @@ compile_inline:	mov	ecx,000h		;ready default cog origin
 
 		jz	error_isie		;if inline section is empty, error
 
-		dec	ecx			;store into placeholder
+		dec	ecx			;store number of longs minus 1 into placeholder
 		mov	[word obj-2+ebx],cx
+
+		ret
+;
+;
+; Compile ORGH inline assembly section
+;
+compile_orgh:	call	get_end			;get end
+
+		mov	al,bc_hub_bytecode	;enter ORGH bytecodes
+		call	enter_obj
+		mov	al,bc_orgh
+		call	enter_obj
+
+		mov	ax,0			;enter placeholder for number of longs
+		call	enter_obj_word
+
+		push	[obj_ptr]		;remember obj_ptr
+
+		mov	[inline_cog_org],000h shl 2		;set cog origin and limit
+		mov	[inline_cog_org_limit],1F8h shl 2
+
+		mov	[orgh],1		;set orgh mode
+		call	compile_inline_section	;compile inline section
+
+		pop	ebx			;get original obj_ptr
+
+@@pad:		mov	eax,ebx			;make inline section a whole number of longs
+		xor	eax,[obj_ptr]
+		and	al,11b
+		jz	@@long
+		mov	al,0
+		call	enter_obj
+		jmp	@@pad
+@@long:
+		mov	ecx,[obj_ptr]		;compute number of longs
+		sub	ecx,ebx
+		shr	ecx,2
+
+		jz	error_isie		;if inline section is empty, error
+		cmp	ecx,0FFFFh
+		ja	error_isil
+
+		mov	[word obj-2+ebx],cx	;store number of longs into placeholder
 
 		ret
 ;
@@ -13827,11 +14001,13 @@ compile_flex:	call	get_left		;get '('
 		jmp	enter_obj
 ;
 ;
-; Compile term - @"string", @obj{[]}.method, @method, or @hubvar
+; Compile term - @"string", @\"string", @obj{[]}.method, @method, or @hubvar
 ;
 ct_at:		call	get_element_obj		;get string, object, method, or variable
 		cmp	al,type_con_int
 		je	@@string
+		cmp	al,type_back
+		je	@@string_esc
 		cmp	al,type_obj
 		je	@@object
 		cmp	al,type_method
@@ -13840,8 +14016,14 @@ ct_at:		call	get_element_obj		;get string, object, method, or variable
 		je	@@var
 		jmp	error_easvmoo
 
+@@string_esc:	call	get_element_obj		;@\"string", get type_con_int
+		cmp	al,type_con_int
+		jne	error_esc
+		mov	ch,1			;set escape-character mode
+		jmp	@@stringbc
 
-@@string:	mov	al,bc_string		;enter string bytecode
+@@string:	mov	ch,0			;@"string", clear escape-character mode
+@@stringbc:	mov	al,bc_string		;enter string bytecode
 		call	enter_obj
 
 		mov	edx,[obj_ptr]		;remember obj_ptr for patching length byte
@@ -13859,7 +14041,9 @@ ct_at:		call	get_element_obj		;get string, object, method, or variable
 		cmp	ebx,0FFh		;above 0FFh not allowed
 		jbe	@@chrok
 @@chrerror:	jmp	error_scmrf
-@@chrok:	mov	al,bl			;enter string chr
+@@chrok:	cmp	ch,1			;if escape-character mode, handle escape character
+		call	handle_escape_chr
+		mov	al,bl			;enter string chr
 		call	enter_obj
 		inc	cl			;check string length
 		jz	error_sdcx
@@ -14002,6 +14186,98 @@ get_element_obj:
 
 ddx		@@value
 ddx		@@start
+;
+;
+; Handle escape character if z=1
+;  on entry, bl holds character (may be '\'), z=1 if escape characters allowed
+;  on exit, bl holds character
+;
+;  \a = 7, alarm bell
+;  \b = 8, backspace
+;  \t = 9, tab
+;  \n = 10, new line
+;  \f = 12, form feed
+;  \r = 13, carriage return
+;  \\ = 92, \ (backslash)
+;  \x01 to \xFF = $01 to $FF (0 is not allowed, as it would terminate the string)
+;
+handle_escape_chr:
+
+		jne	@@done			;escape mode?
+
+		cmp	bl,'\'			;backslash?
+		jne	@@done
+
+		call	@@getchr		;get initial character after backslash
+
+		cmp	al,'A'
+		mov	bl,7
+		je	@@done
+
+		cmp	al,'B'
+		mov	bl,8
+		je	@@done
+
+		cmp	al,'T'
+		mov	bl,9
+		je	@@done
+
+		cmp	al,'N'
+		mov	bl,10
+		je	@@done
+
+		cmp	al,'F'
+		mov	bl,12
+		je	@@done
+
+		cmp	al,'R'
+		mov	bl,13
+		je	@@done
+
+		cmp	al,'"'
+		mov	bl,'"'
+		je	@@done
+
+		cmp	al,'\'
+		mov	bl,'\'
+		je	@@done
+
+		cmp	al,'X'			;hex character 'x??'
+		jne	@@nothex
+		call	@@getchr
+		call	check_hex
+		jc	error_iec
+		mov	bl,al
+		call	@@getchr
+		call	check_hex
+		jc	error_iec
+		shl	bl,4
+		or	bl,al
+		jz	error_scmrf		;error if zero
+		jmp	@@done
+@@nothex:
+		call	back_element		;unrecognized chr, back up and pass '\'
+		call	back_element
+		mov	bl,'\'
+
+@@done:		ret
+
+
+@@getchr:	push	ebx
+		cmp	[source_flags],0	;make sure string not done
+		je	error_esc
+		call	get_comma
+		call	get_element_obj		;get string chr
+		cmp	al,type_con_int
+		jne	error_esc
+		cmp	ebx,1
+		jl	error_scmrf
+		cmp	ebx,0FFh
+		jg	error_scmrf
+		mov	al,bl
+		call	uppercase
+		pop	ebx
+		ret
 ;
 ;
 ; Get ???
@@ -14443,11 +14719,15 @@ scan_to_end:	push	eax
 ; Check for local symbol
 ; c=0 if local
 ;
-check_local:	cmp	al,type_dot		;if not dot, exit with c=1
+check_local:	cmp	al,type_colon		;if colon or dot, local symbol
+		je	@@is
+		cmp	al,type_dot
+		je	@@is
 		stc
-		jne	@@ret
+		ret
 
-		push	ecx
+
+@@is:		push	ecx
 
 		push	[source_start]		;check for symbol after dot
 		call	get_symbol
@@ -14470,7 +14750,7 @@ check_local:	cmp	al,type_dot		;if not dot, exit with c=1
 		call	find_symbol		;find local symbol
 		clc				;c=0
 
-@@ret:		ret
+		ret
 ;
 ;
 ; Get type_obj_int/float/struct/pub symbol
@@ -16194,7 +16474,7 @@ compile_var_assign:
 ;					  1 if index or sub structure (returns address at runtime)
 ;					  3 if byte/word/long (performs setup at runtime for read/write/assign)
 ;
-;	compiled_struct_size		= size of last structure in expression
+;	compiled_struct_size		= size of last structure/byte/word/long in expression
 ;	compiled_struct_address		= address of byte/word/long (before any index)
 ;	compiled_struct_word_size	= size of member, if present (0/1/2 for byte/word/long)
 ;	compiled_struct_source_ptr	= source pointer after byte/word/long member (before [index]/.[bitfield] exp)
@@ -16436,8 +16716,7 @@ compile_struct_setup:
 		mov	al,[byte @@flags]		;set flags
 		mov	[compiled_struct_flags],al
 
-		mov	eax,[struct_id_to_def+eax*4]	;set structure size
-		mov	eax,[dword struct_def+eax]
+		mov	eax,[@@size]			;set structure/byte/word/long size
 		mov	[compiled_struct_size],eax
 
 		mov	eax,[@@offset]			;set address
@@ -18244,11 +18523,13 @@ count	dd_key_circle			;CIRCLE
 count	dd_key_clear			;CLEAR
 count	dd_key_close			;CLOSE
 count	dd_key_color			;COLOR
+count	dd_key_crop			;CROP
 count	dd_key_depth			;DEPTH
 count	dd_key_dot			;DOT
 count	dd_key_dotsize			;DOTSIZE
 count	dd_key_hidexy			;HIDEXY
 count	dd_key_holdoff			;HOLDOFF
+count	dd_key_layer			;LAYER
 count	dd_key_line			;LINE
 count	dd_key_linesize			;LINESIZE
 count	dd_key_logscale			;LOGSCALE
@@ -18353,11 +18634,13 @@ debug_symbols:
 	sym	dd_key,	dd_key_clear,			'CLEAR'
 	sym	dd_key,	dd_key_close,			'CLOSE'
 	sym	dd_key,	dd_key_color,			'COLOR'
+	sym	dd_key,	dd_key_crop,			'CROP'
 	sym	dd_key,	dd_key_depth,			'DEPTH'
 	sym	dd_key,	dd_key_dot,			'DOT'
 	sym	dd_key,	dd_key_dotsize,			'DOTSIZE'
 	sym	dd_key,	dd_key_hidexy,			'HIDEXY'
 	sym	dd_key,	dd_key_holdoff,			'HOLDOFF'
+	sym	dd_key,	dd_key_layer,			'LAYER'
 	sym	dd_key,	dd_key_line,			'LINE'
 	sym	dd_key,	dd_key_linesize,		'LINESIZE'
 	sym	dd_key,	dd_key_logscale,		'LOGSCALE'
@@ -18951,6 +19234,11 @@ enter_symbols_level:
 		lea	esi,[level47_symbols]
 		call	enter_symbols
 @@not47:
+		cmp	[spin2_level],50
+		jb	@@not50
+		lea	esi,[level50_symbols]
+		call	enter_symbols
+@@not50:
 		ret
 ;
 ;
@@ -20657,6 +20945,13 @@ level47_symbols:
 	sym	type_con_int,		0FFFFFFFFh,	'NEWTASK'
 	sym	type_con_int,		0FFFFFFFFh,	'THISTASK'
 	sym	type_register,		taskhlt_reg,	'TASKHLT'
+
+	db	0
+
+
+level50_symbols:
+
+	sym	type_asm_dir,		dir_ditto,	'DITTO'
 
 	db	0
 ;
