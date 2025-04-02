@@ -178,7 +178,7 @@ const
 
   clRed                 = $FF0000;
   clLime                = $00FF00;
-  clBlue                = $3F3FFF;
+  clBlue                = $7F7FFF;
   clYellow              = $FFFF00;
   clMagenta             = $FF00FF;
   clCyan                = $00FFFF;

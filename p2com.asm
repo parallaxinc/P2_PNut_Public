@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v50		*
+;*	       Spin2 Compiler v51		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2025 by Parallax, Inc.	*
-;*	    Last Updated: 2025/02/15		*
+;*	    Last Updated: 2025/02/17		*
 ;*						*
 ;************************************************
 
@@ -32,13 +32,13 @@
 ;
 ; Equates
 ;
-spin2_version		=	50
+spin2_version		=	51
 
-obj_limit		=	100000h		;must be same in delphi
+obj_size_limit		=	100000h		;must be same in delphi
 obj_data_limit		=	200000h		;must be same in delphi
-file_limit		=	255		;must be same in delphi
-pre_symbol_limit	=	16		;must be same in delphi
-obj_param_limit		=	16		;must be same in delphi
+files_limit		=	255		;must be same in delphi
+pre_symbols_limit	=	16		;must be same in delphi
+obj_params_limit	=	16		;must be same in delphi
 info_limit		=	2000		;must be same in delphi
 debug_data_limit	=	4000h		;must be same in delphi
 debug_string_limit	=	8000h		;must be same in delphi
@@ -56,9 +56,9 @@ symbols_limit_local	=	8000h
 symbols_limit_inline	=	8000h
 
 struct_id_limit		=	1000h		;cannot exceed $1000
-struct_def_limit	=	8000h
+struct_def_limit	=	20000h
 
-symbol_limit		=	30
+symbol_size_limit	=	30
 pubcon_list_limit	=	10000h
 
 block_nest_limit	=	16
@@ -67,19 +67,21 @@ if_limit		=	256
 case_limit		=	256
 case_fast_limit		=	256		;cannot exceed 256
 
-params_limit		=	127
-results_limit		=	15
-locals_limit		=	10000h + params_limit*4 + results_limit*4
 objs_limit		=	1024
-subs_limit		=	1024
+methods_limit		=	1024
+
+method_params_limit	=	127
+method_results_limit	=	15
+method_locals_limit	=	10000h + method_params_limit*4 + method_results_limit*4
+
 distiller_limit		=	10000h
 
-inline_limit		=	120h		;make sure these are current
+inline_org_limit	=	120h		;make sure these are current
 taskhlt_reg		=	1CCh
 mrecv_reg		=	1D1h
 msend_reg		=	1D2h
-pasm_regs		=	1D8h
-inline_locals		=	1E0h
+prx_regs		=	1D8h
+inline_locals_base	=	1E0h
 
 debug_size_limit	=	2A00h
 
@@ -1092,12 +1094,12 @@ count		bc_setup_bfield_rfvar
 counti		bc_setup_bfield_0_31,32
 
 
-count2n		bc_hubset		,54h	;hub bytecodes, miscellaneous (step by 2)
+count2n		bc_hubset		,54h	;hub bytecodes, miscellaneous routines (step by 2)
 count2		bc_clkset
-count2		bc_read_clkfreq
 count2		bc_cogspin
 count2		bc_cogchk
 count2		bc_org
+count2		bc_orgh
 count2		bc_regexec
 count2		bc_regload
 count2		bc_call
@@ -1129,37 +1131,43 @@ count2		bc_qcos
 count2		bc_rotxy
 count2		bc_polxy
 count2		bc_xypol
+count2		bc_pinread
+count2		bc_pinwrite
+count2		bc_pinstart
+count2		bc_pinclear
 
-count2		bc_float			;hub bytecodes, floating point
-count2		bc_trunc
+count2		bc_float			;hub bytecodes, floating point routines
 count2		bc_round
+count2		bc_trunc
+count2		bc_nan
 count2		bc_fneg
 count2		bc_fabs
-count2		bc_fsqrt
-count2		bc_fadd
-count2		bc_fsub
-count2		bc_fmul
-count2		bc_fdiv
 count2		bc_flt
 count2		bc_fgt
 count2		bc_fne
 count2		bc_fe
 count2		bc_flte
 count2		bc_fgte
-count2		bc_nan
+count2		bc_fadd
+count2		bc_fsub
+count2		bc_fmul
+count2		bc_fdiv
+count2		bc_pow
+count2		bc_log2
+count2		bc_log10
+count2		bc_log
+count2		bc_exp2
+count2		bc_exp10
+count2		bc_exp
+count2		bc_fsqrt
 
-count2		bc_pinread			;hub bytecodes, miscellaneous
-count2		bc_pinwrite
-count2		bc_pinstart
-count2		bc_pinclear
-count2		bc_taskspin
+count2		bc_taskspin			;hub bytecodes, multitasking routines
 count2		bc_taskstop
 count2		bc_taskhalt
 count2		bc_taskcont
 count2		bc_taskchk
 count2		bc_taskid
 count2		bc_task_return
-count2		bc_orgh
 ;
 ;
 ; Flex codes
@@ -1251,10 +1259,10 @@ flexcode	fc_rotxy,	bc_rotxy,	3,	2,	0,	1
 flexcode	fc_polxy,	bc_polxy,	2,	2,	0,	1
 flexcode	fc_xypol,	bc_xypol,	2,	2,	0,	1
 
-flexcode	fc_nan,		bc_nan,		1,	1,	0,	1
+flexcode	fc_float,	bc_float,	1,	1,	0,	1
 flexcode	fc_round,	bc_round,	1,	1,	0,	1
 flexcode	fc_trunc,	bc_trunc,	1,	1,	0,	1
-flexcode	fc_float,	bc_float,	1,	1,	0,	1
+flexcode	fc_nan,		bc_nan,		1,	1,	0,	1
 
 flexcode	fc_tasknext,	bc_tasknext,	0,	0,	0,	0
 flexcode	fc_taskstop,	bc_taskstop,	1,	0,	0,	1
@@ -1268,13 +1276,13 @@ flexcode	fc_taskid,	bc_taskid,	0,	1,	0,	1
 ;
 ;	Operator precedence (highest to lowest)
 ;
-;	0	!, -, ABS, FABS, ENCOD, DECOD, BMASK, ONES, SQRT, FSQRT, QLOG, QEXP	(unary)
+;	0	!, -, ABS, FABS, ENCOD, DECOD, BMASK, ONES, SQRT, FSQRT, QLOG, QEXP,...	(unary)
 ;	1	>>, <<, SAR, ROR, ROL, REV, ZEROX, SIGNX				(binary)
 ;	2	&									(binary)
 ;	3	^									(binary)
 ;	4	|									(binary)
 ;	5	*, *., /, /., +/, //, +//, SCA, SCAS, FRAC				(binary)
-;	6	+, +., -, -.								(binary)
+;	6	+, +., -, -., POW							(binary)
 ;	7	#>, <#									(binary)
 ;	8	ADDBITS, ADDPINS							(binary)
 ;	9	<, <., +<, <=, <=., +<=, ==, ==., <>, <>., >=, >=., +>=, >, >., +>, <=>	(binary)
@@ -1300,6 +1308,12 @@ count		op_sqrt		;	SQRT		unary		0	-
 count		op_fsqrt	;	FSQRT		unary		0	-
 count		op_qlog		;	QLOG		unary		0	-
 count		op_qexp		;	QEXP		unary		0	-
+count		op_log2		;	LOG2		unary		0	-
+count		op_log10	;	LOG10		unary		0	-
+count		op_log		;	LOG		unary		0	-
+count		op_exp2		;	EXP2		unary		0	-
+count		op_exp10	;	EXP10		unary		0	-
+count		op_exp		;	EXP		unary		0	-
 count		op_shr		;	>>		binary		1	-
 count		op_shl		;	<<		binary		1	-
 count		op_sar		;	SAR		binary		1	-
@@ -1325,6 +1339,7 @@ count		op_add		;	+		binary		6	yes
 count		op_fadd		;	+.		binary		6	-
 count		op_sub		;	-		binary		6	yes
 count		op_fsub		;	-.		binary		6	-
+count		op_pow		;	POW		binary		6	yes
 count		op_fge		;	#>		binary		7	yes
 count		op_fle		;	<#		binary		7	yes
 count		op_addbits	;	ADDBITS		binary		8	-
@@ -1382,6 +1397,12 @@ opcode		oc_sqrt,	op_sqrt,	0,	bc_sqrt,	0,	0,	1,	1,	0,	0,	0	; SQRT
 opcode		oc_fsqrt,	op_fsqrt,	0,	bc_fsqrt,	0,	0,	1,	0,	1,	0,	1	; FSQRT
 opcode		oc_qlog,	op_qlog,	0,	bc_qlog,	0,	0,	1,	1,	0,	0,	0	; QLOG
 opcode		oc_qexp,	op_qexp,	0,	bc_qexp,	0,	0,	1,	1,	0,	0,	0	; QEXP
+opcode		oc_log2,	op_log2,	0,	bc_log2,	0,	0,	1,	0,	1,	0,	1	; LOG2
+opcode		oc_log10,	op_log10,	0,	bc_log10,	0,	0,	1,	0,	1,	0,	1	; LOG10
+opcode		oc_log,		op_log,		0,	bc_log,		0,	0,	1,	0,	1,	0,	1	; LOG
+opcode		oc_exp2,	op_exp2,	0,	bc_exp2,	0,	0,	1,	0,	1,	0,	1	; EXP2
+opcode		oc_exp10,	op_exp10,	0,	bc_exp10,	0,	0,	1,	0,	1,	0,	1	; EXP10
+opcode		oc_exp,		op_exp,		0,	bc_exp,		0,	0,	1,	0,	1,	0,	1	; EXP
 opcode		oc_shr,		op_shr,		1,	bc_shr,		0,	1,	0,	1,	0,	0,	0	; >>
 opcode		oc_shl,		op_shl,		1,	bc_shl,		0,	1,	0,	1,	0,	0,	0	; <<
 opcode		oc_sar,		op_sar,		1,	bc_sar,		0,	1,	0,	1,	0,	0,	0	; SAR
@@ -1407,6 +1428,7 @@ opcode		oc_add,		op_add,		6,	bc_add,		0,	1,	0,	1,	1,	0,	0	; +
 opcode		oc_fadd,	op_fadd,	6,	bc_fadd,	0,	1,	0,	0,	1,	0,	1	; +.
 opcode		oc_sub,		op_sub,		6,	bc_sub,		0,	1,	0,	1,	1,	0,	0	; -
 opcode		oc_fsub,	op_fsub,	6,	bc_fsub,	0,	1,	0,	0,	1,	0,	1	; -.
+opcode		oc_pow,		op_pow,		6,	bc_pow,		0,	1,	0,	0,	1,	0,	1
 opcode		oc_fge,		op_fge,		7,	bc_fge,		0,	1,	0,	1,	1,	0,	0	; #>
 opcode		oc_fle,		op_fle,		7,	bc_fle,		0,	1,	0,	1,	1,	0,	0	; <#
 opcode		oc_addbits,	op_addbits,	8,	bc_addbits,	0,	1,	0,	1,	0,	0,	0	; ADDBITS
@@ -1603,37 +1625,37 @@ ddx		doc_limit					;doc limit
 ddx		doc_length					;doc length
 
 ddx		pre_symbols					;preprocessor symbols
-dbx		pre_symbol_names,pre_symbol_limit*32		;preprocessor symbol names
+dbx		pre_symbol_names,pre_symbols_limit*32		;preprocessor symbol names
 
 ddx		params						;object parameters
-dbx		param_names,obj_param_limit*32			;object parameter names
-dbx		param_types,obj_param_limit			;object parameter types
-ddx		param_values,obj_param_limit			;object parameter values
+dbx		param_names,obj_params_limit*32			;object parameter names
+dbx		param_types,obj_params_limit			;object parameter types
+ddx		param_values,obj_params_limit			;object parameter values
 
-dbx		obj,obj_limit					;object buffer
+dbx		obj,obj_size_limit				;object buffer
 ddx		obj_ptr						;object length
 
 ddx		obj_files					;object file count
-dbx		obj_filenames,file_limit*256			;object filenames
-ddx		obj_name_start,file_limit			;object filenames source start
-ddx		obj_name_finish,file_limit			;object filenames source finish
-ddx		obj_params,file_limit				;object parameters
-dbx		obj_param_names,file_limit*obj_param_limit*32	;object parameter names
-dbx		obj_param_types,file_limit*obj_param_limit	;object parameter types
-ddx		obj_param_values,file_limit*obj_param_limit	;object parameter values
-ddx		obj_offsets,file_limit				;object offsets
-ddx		obj_lengths,file_limit				;object lengths
+dbx		obj_filenames,files_limit*256			;object filenames
+ddx		obj_name_start,files_limit			;object filenames source start
+ddx		obj_name_finish,files_limit			;object filenames source finish
+ddx		obj_params,files_limit				;object parameters
+dbx		obj_param_names,files_limit*obj_params_limit*32	;object parameter names
+dbx		obj_param_types,files_limit*obj_params_limit	;object parameter types
+ddx		obj_param_values,files_limit*obj_params_limit	;object parameter values
+ddx		obj_offsets,files_limit				;object offsets
+ddx		obj_lengths,files_limit				;object lengths
 dbx		obj_data,obj_data_limit				;object data
-ddx		obj_instances,file_limit			;object instances
+ddx		obj_instances,files_limit			;object instances
 dbx		obj_title,256					;object title
 
 ddx		dat_files					;data file count
-dbx		dat_filenames,file_limit*256			;data filenames
-ddx		dat_name_start,file_limit			;data filenames source start
-ddx		dat_name_finish,file_limit			;data filenames source finish
-ddx		dat_offsets,file_limit				;data offsets
-ddx		dat_lengths,file_limit				;data lengths
-dbx		dat_data,obj_limit				;data data
+dbx		dat_filenames,files_limit*256			;data filenames
+ddx		dat_name_start,files_limit			;data filenames source start
+ddx		dat_name_finish,files_limit			;data filenames source finish
+ddx		dat_offsets,files_limit				;data offsets
+ddx		dat_lengths,files_limit				;data lengths
+dbx		dat_data,obj_size_limit				;data data
 
 ddx		info_count					;info count	(used by PropellerTool)
 ddx		info_start,info_limit				;info source start
@@ -2054,7 +2076,7 @@ error_dioa:	call	set_error
 		db	'"$" (DAT origin) is only allowed in DAT blocks',0
 
 error_diioa:	call	set_error
-		db	'"$$" (DITTO index) is only allowed within a DITTO section, inside a DAT block',0
+		db	'"$$" (DITTO index) is only allowed within a DITTO block, inside a DAT block',0
 
 error_divo:	call	set_error
 		db	'Division overflow',0
@@ -2218,6 +2240,9 @@ error_eeol:	call	set_error
 error_eeone:	call	set_error
 		db	'Expected "==" or "<>"',0
 
+error_eeqol:	call	set_error
+		db	'Expected "=" or "("',0
+
 error_eequal:	call	set_error
 		db	'Expected "="',0
 
@@ -2226,6 +2251,9 @@ error_efrom:	call	set_error
 
 error_eicon:	call	set_error
 		db	'Expected integer constant',0
+
+error_eiconos:	call	set_error
+		db	'Expected integer constant or structure (for size)',0
 
 error_eidbwloe:	call	set_error
 		db	'Expected instruction, directive, BYTE/WORD/LONG, or END',0
@@ -2238,6 +2266,9 @@ error_eleft:	call	set_error
 
 error_eleftb:	call	set_error
 		db	'Expected "["',0
+
+error_eloe:	call	set_error
+		db	'Expected "(" or "="',0
 
 error_enope:	call	set_error
 		db	'Expected number of parameters exceeded',0
@@ -2339,7 +2370,7 @@ error_hsvi:	call	set_error
 		db	'Highest selectable Spin2 version is v', spin2_version / 10 + '0', spin2_version mod 10 + '0',0
 
 error_icaexl:	call	set_error
-		db	'Inline cog address exceeds $120 limit',0	;TESTT make sure address is up-to-date
+		db	'Inline cog address exceeds $11F limit',0	;TESTT make sure address is up-to-date
 
 error_iccbl:	call	set_error
 		db	'Instance count cannot be less than 1',0
@@ -2375,10 +2406,10 @@ error_iscexb:	call	set_error
 		db	"Indexed structures cannot exceed $FFFF bytes in size",0
 
 error_isie:	call	set_error
-		db	'ORG/ORGH inline section is empty',0
+		db	'ORG/ORGH inline block is empty',0
 
 error_isil:	call	set_error
-		db	'ORGH inline section exceeds $FFFF longs (including the added RET instruction)',0
+		db	'ORGH inline block exceeds $FFFF longs (including the added RET instruction)',0
 
 error_level44:	call	set_error
 		db	'{Spin2_v44} is no longer supported due to changes in data structures beginning in v45',0
@@ -2419,8 +2450,8 @@ error_loxpe:	call	set_error
 error_loxre:	call	set_error
 		db	'Limit of 15 results exceeded',0
 
-error_loxriee:	call	set_error
-		db	'Limit of 3 runtime index expressions exceeded',0
+error_loxrs:	call	set_error
+		db	'Limit of 3 runtime structure index expressions exceeded',0
 
 error_loxuoe:	call	set_error
 		db	'Limit of 32 unique objects exceeded',0
@@ -2465,7 +2496,7 @@ error_odo:	call	set_error
 		db	'Object distiller overflow',0
 
 error_ohnawads:	call	set_error
-		db	'ORGH not allowed within a DITTO section',0
+		db	'ORGH not allowed within a DITTO block',0
 
 error_ohnawiac:	call	set_error
 		db	'ORGH not allowed within inline assembly code',0
@@ -2486,7 +2517,7 @@ error_oiina:	call	set_error
 		db	'Object index is not allowed before constants and structures',0
 
 error_onawads:	call	set_error
-		db	'ORG not allowed within a DITTO section',0
+		db	'ORG not allowed within a DITTO block',0
 
 error_onawiac:	call	set_error
 		db	'ORG not allowed within inline assembly code',0
@@ -2581,6 +2612,9 @@ error_smb0t7:	call	set_error
 error_smbss:	call	set_error
 		db	'Structures must be same size',0
 
+error_soioa:	call	set_error
+		db	'SIZEOF() is only allowed in DAT, VAR, PUB, and PRI blocks',0
+
 error_spmcrmv:	call	set_error
 		db	'SEND parameter methods cannot return multiple values',0
 
@@ -2609,7 +2643,7 @@ error_tmpd:	call	set_error
 		db	'Too much parameter data',0
 
 error_tmrmr:	call	set_error
-		db	'This method returns multiple results',0
+		db	'This method returns multiple result longs',0
 
 error_tmrnr:	call	set_error
 		db	'This method returns no results',0
@@ -2775,6 +2809,7 @@ _compile1:	mov	[error],1		;init error to true
 		call	reset_symbols_inline	;reset inline symbols
 		call	write_symbols_main	;write main symbols
 		mov	[con_block_flag],0	;reset con block flag
+		mov	[obj_block_flag],0	;reset obj block flag
 		mov	[asm_local],30303030h	;reset asm local to '0000'
 		mov	[pubcon_list_size],0	;reset pub/con list
 		mov	[list_length],0		;reset list length
@@ -2931,6 +2966,7 @@ compile_done:	mov	[source_start],0	;reset source pointers
 ; Data
 ;
 dbx		con_block_flag
+dbx		obj_block_flag
 
 ddx		struct_id_next
 ddx		struct_id_to_def,struct_id_limit
@@ -3758,7 +3794,7 @@ compile_con_blocks_2nd:
 
 compile_con_blocks:
 
-		mov	[con_block_flag],1	;enable register addresses as constants
+		mov	[con_block_flag],1	;set con block flag (enables registers as constants, inhibits SIZEOF use)
 
 		mov	[@@pass],al		;set pass
 
@@ -3919,7 +3955,14 @@ compile_con_blocks:
 		jne	error_eausn
 		cmp	[@@pass],000b		;if last pass, enter structure definition
 		je	@@structenter
-		call	scan_to_end		;not last pass, skip rest of line
+		call	check_left		;otherwise, if '(', scan to ')'
+		je	@@structlskip
+		call	check_equal		;otherwise, if '=', skip to comma or end of line
+		je	@@structeskip
+		jmp	error_eloe		;error, neither '(' or '=' found
+@@structlskip:	call	scan_to_right		;scan to ')'
+		jmp	@@next
+@@structeskip:	call	skip_to_comma_or_end	;skip to comma or end of line
 		jmp	@@next
 @@structenter:
 		call	backup_symbol		;backup symbol
@@ -3956,7 +3999,7 @@ compile_con_blocks:
 		call	get_element		;comma, get next element, sameline
 		jmp	@@sameline
 
-@@done:		mov	[con_block_flag],0	;inhibit register addresses from being used as constants
+@@done:		mov	[con_block_flag],0	;clear con block flag
 		ret
 
 
@@ -3994,6 +4037,8 @@ ddx		@@assign_value
 ; Compile obj blocks - get id's, filenames, and parameters
 ;
 compile_obj_blocks_id:
+
+		mov	[obj_block_flag],1	;set obj block flag (inhibits SIZEOF use)
 
 		mov	[obj_ptr],0		;reset obj pointer
 		mov	[obj_count],0		;reset obj count
@@ -4038,7 +4083,7 @@ compile_obj_blocks_id:
 		inc	ecx			;include zero-terminator
 
 		mov	edx,[obj_files]		;get file number and check limit
-		cmp	edx,file_limit
+		cmp	edx,files_limit
 		je	error_loxuoe
 
 		mov	edi,edx			;enter filename
@@ -4077,12 +4122,12 @@ compile_obj_blocks_id:
 		call	get_pipe_or_end		;any parameters?
 		jne	@@noparams
 
-		mov	eax,obj_param_limit	;get parameter base
+		mov	eax,obj_params_limit	;get parameter base
 		mul	edx
 		mov	edx,eax
 
 @@param:	mov	eax,[obj_files]		;check param limit
-		cmp	[obj_params+eax*4],obj_param_limit
+		cmp	[obj_params+eax*4],obj_params_limit
 		je	error_tmop
 
 		call	get_element_obj		;get parameter name
@@ -4118,7 +4163,8 @@ compile_obj_blocks_id:
 
 		jmp	@@nextline
 
-@@done:		ret
+@@done:		mov	[obj_block_flag],0	;clear obj block flag
+		ret
 
 
 ddx		@@count
@@ -4187,7 +4233,7 @@ compile_sub_blocks_id:
 		jne	error_eaupn
 		mov	eax,[@@size]		;advance parameter count
 		add	[@@params],eax
-		cmp	[@@params],params_limit
+		cmp	[@@params],method_params_limit
 		ja	error_loxpe
 		call	get_comma_or_right	;get comma or ')'
 		je	@@param
@@ -4211,7 +4257,7 @@ compile_sub_blocks_id:
 		jne	error_eaurn
 		mov	eax,[@@size]		;advance parameter count
 		add	[@@results],eax
-		cmp	[@@results],results_limit
+		cmp	[@@results],method_results_limit
 		ja	error_loxre
 		call	check_comma		;check for comma
 		je	@@result
@@ -4244,11 +4290,11 @@ compile_sub_blocks_id:
 		je	@@local			;if comma, get next local
 @@nolocals:
 
-		mov	ebx,[obj_ptr]		;get sub index
+		mov	ebx,[obj_ptr]		;get method index
 		shr	ebx,2
 		mov	eax,ebx
-		sub	eax,[@@base]		;subs limit exceeded?
-		cmp	eax,subs_limit
+		sub	eax,[@@base]		;method limit exceeded?
+		cmp	eax,methods_limit
 		je	error_loxppme
 
 		mov	eax,[@@params]		;get parameter count
@@ -4332,7 +4378,7 @@ compile_dat_blocks_fn:
 		jmp	@@check
 
 @@new:		inc	[dat_files]		;unique file, check files limit
-		cmp	[dat_files],file_limit
+		cmp	[dat_files],files_limit
 		ja	error_loxudfe
 
 	rep	movsb				;enter filename
@@ -4458,12 +4504,12 @@ compile_obj_symbols:
 
 
 @@ispub:	lodsb				;type_obj_pub, get param count into ebx[31:24]
-		cmp	al,params_limit
+		cmp	al,method_params_limit
 		ja	@@error
 		mov	bl,al
 		shl	ebx,24
 		lodsb				;get result count into ebx[23:20]
-		cmp	al,results_limit
+		cmp	al,method_results_limit
 		ja	@@error
 		movzx	eax,al
 		shl	eax,20
@@ -4579,7 +4625,7 @@ compile_var_blocks:
 		call	is_ptr
 		je	error_pcba
 		call	get_value_int		;get count
-		cmp	ebx,obj_limit
+		cmp	ebx,obj_size_limit
 		ja	@@error_tmvsid
 		call	get_rightb		;get ']'
 @@nocount:
@@ -4587,13 +4633,13 @@ compile_var_blocks:
 		mul	ebx
 		or	edx,edx
 		jnz	@@error_tmvsid
-		cmp	eax,obj_limit
+		cmp	eax,obj_size_limit
 		jae	@@error_tmvsid
 		xchg	[var_ptr],eax
 		add	[var_ptr],eax
-		cmp	[var_ptr],obj_limit
+		cmp	[var_ptr],obj_size_limit
 		jae	@@error_tmvsid
-		cmp	eax,obj_limit
+		cmp	eax,obj_size_limit
 		jae	@@error_tmvsid
 
 		mov	ebx,eax			;enter symbol
@@ -4618,7 +4664,7 @@ compile_var_blocks:
 		jz	@@ret
 		or	[var_ptr],ecx
 		inc	[var_ptr]
-@@check:	cmp	[var_ptr],obj_limit	;check size
+@@check:	cmp	[var_ptr],obj_size_limit	;check size
 		jae	@@error_tmvsid
 @@ret:		ret
 
@@ -4637,7 +4683,7 @@ compile_dat_blocks:				;dat block mode
 		mov	[inline_flag],0
 		jmp	compile_dat
 
-compile_inline_section:				;inline mode
+compile_inline_block:				;inline mode
 		mov	[inline_flag],1
 		call	write_symbols_inline	;start inline symbols
 
@@ -4914,7 +4960,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 
 		cmp	[inline_flag],1		;ORGH, make sure not inline mode
 		je	error_ohnawiac
-		cmp	[ditto_flag],1		;make sure not in a DITTO section
+		cmp	[ditto_flag],1		;make sure not in a DITTO block
 		je	error_ohnawads
 		mov	[orgh],1		;set orgh mode
 		call	@@nosymbol		;make sure no symbol
@@ -4933,9 +4979,9 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		je	@@dirorghp
 		cmp	ebx,400h
 		jb	error_habxl
-@@dirorghp:	cmp	ebx,obj_limit		;make sure within hard limit
+@@dirorghp:	cmp	ebx,obj_size_limit	;make sure within hard limit
 		ja	error_haec
-		mov	ecx,obj_limit		;ready default limit in case no comma
+		mov	ecx,obj_size_limit	;ready default limit in case no comma
 		call	check_comma
 		jne	@@dirorghdef
 		push	ebx			;comma, get limit value
@@ -4944,7 +4990,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		pop	ebx
 		cmp	ecx,ebx			;make sure limit at least new orgh
 		jb	error_hael
-		cmp	ecx,obj_limit		;make sure limit within hard limit
+		cmp	ecx,obj_size_limit	;make sure limit within hard limit
 		ja	error_haec
 @@dirorghdef:	mov	[hub_org],ebx		;update hub org
 		mov	[hub_org_limit],ecx	;update hub org limit
@@ -4982,7 +5028,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 
 @@dirorg:	cmp	[inline_flag],1		;ORG, make sure not inline mode
 		je	error_onawiac
-		cmp	[ditto_flag],1		;make sure not in a DITTO section
+		cmp	[ditto_flag],1		;make sure not in a DITTO block
 		je	error_onawads
 		call	@@nosymbol		;make sure no symbol
 		call	get_element		;preview next element
@@ -5689,7 +5735,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 
 @@op_debug:	call	check_debug		;DEBUG, if disabled, ignore rest of line and emit nothing
 		je	@@debugon
-		call	scan_to_end		;scan to end of line
+		call	skip_to_end		;skip to end of line
 		call	get_end			;get end
 		pop	eax			;pop return address so no long is emitted
 		jmp	@@nextline		;get next line
@@ -5715,7 +5761,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 
 @@debugleft:	cmp	[@@pass],0		;parameters, if pass 0, skip parameters and emit long
 		jne	@@debugpass1
-		jmp	scan_to_end		;scan to end of line
+		jmp	skip_to_end		;skip to end of line
 @@debugpass1:
 		push	ecx			;pass 1
 		call	ci_debug_asm		;compile debug for asm, returns BRK index in al
@@ -6033,7 +6079,7 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		ret
 
 
-@@get_corz:	call	get_element_obj		;get wc/andc/orc/xorc or wz/andz/orz/xorz
+@@get_corz:	call	get_element		;get wc/andc/orc/xorc or wz/andz/orz/xorz
 		cmp	al,type_asm_effect2
 		je	@@get_corz_wr
 		cmp	al,type_asm_effect
@@ -6559,7 +6605,7 @@ compile_sub_blocks:
 		call	check_leftb		;'['?
 		jne	@@nocount		;(already disallowed for ^byte/word/long/struct)
 		call	get_value_int		;get count
-		cmp	ebx,locals_limit
+		cmp	ebx,method_locals_limit
 		ja	@@error_loxlve
 		call	get_rightb		;get ']'
 @@nocount:
@@ -6567,13 +6613,13 @@ compile_sub_blocks:
 		mul	ebx
 		or	edx,edx
 		jnz	@@error_loxlve
-		cmp	eax,locals_limit
+		cmp	eax,method_locals_limit
 		jae	@@error_loxlve
 		xchg	[@@local],eax
 		add	[@@local],eax
-		cmp	[@@local],locals_limit
+		cmp	[@@local],method_locals_limit
 		jae	@@error_loxlve
-		cmp	eax,locals_limit
+		cmp	eax,method_locals_limit
 		jae	@@error_loxlve
 
 		call	get_comma_or_end	;get comma or end
@@ -6584,10 +6630,8 @@ compile_sub_blocks:
 
 		mov	eax,[@@local]		;compile rfvar for local variables
 		sub	eax,[@@localvar]
-		test	eax,11b			;round up to long
-		jz	@@rounded
-		add	eax,4
-@@rounded:	shr	eax,2
+		add	eax,11b			;round up to long
+		shr	eax,2
 		call	compile_rfvar
 
 		mov	eax,[@@sub]		;set number of results for method
@@ -6682,7 +6726,7 @@ compile_obj_blocks:
 
 		mov	eax,[@@objvar+ebx*4]	;update var pointer, check limit
 		add	[var_ptr],eax
-		cmp	[var_ptr],obj_limit
+		cmp	[var_ptr],obj_size_limit
 		ja	error_tmvsid
 
 		loop	@@index			;handle next object
@@ -6690,8 +6734,8 @@ compile_obj_blocks:
 @@done:		ret
 
 
-ddx		@@objptr,file_limit
-ddx		@@objvar,file_limit
+ddx		@@objptr,files_limit
+ddx		@@objvar,files_limit
 ;
 ;
 ; Distill obj blocks
@@ -6723,7 +6767,7 @@ distill_obj_blocks:
 ;	struct record
 ;	-------------
 ;	word: size_of_struct_record (including this word)
-;	long: size_of_struct
+;	long: size_of_struct_memory
 ;	member record(s)
 ;	    long: member offset address
 ;	    byte: type (0=byte, 1=word, 2=long, 3=struct + struct_record)
@@ -6741,14 +6785,15 @@ build_struct_record:
 		jmp	@@enter_struct			;copy other struct into this struct
 @@notassign:
 
-		call	get_left			;get '('
+		call	check_left			;get '('
+		jne	error_eeqol
 
 		mov	eax,[struct_def_ptr]		;save start address for size patching
 		mov	[@@start],eax
 
 		mov	ebx,0
 		call	@@enter_word			;reserve space for size_of_struct_record patch
-		call	@@enter_long			;reserve space for size_of_struct patch
+		call	@@enter_long			;reserve space for size_of_struct_memory patch
 
 		mov	[@@offset],0			;reset offset address
 
@@ -6802,10 +6847,10 @@ build_struct_record:
 		mul	ebx
 		or	edx,edx
 		jnz	@@error_sehr
-		cmp	eax,obj_limit
+		cmp	eax,obj_size_limit
 		ja	@@error_sehr
 		add	[@@offset],eax			;update offset
-		cmp	[@@offset],obj_limit
+		cmp	[@@offset],obj_size_limit
 		jae	@@error_sehr
 
 		call	get_comma_or_right		;get comma or ')'
@@ -6820,7 +6865,7 @@ build_struct_record:
 		mov	ebx,[struct_def_ptr]		;patch size_of_struct_record
 		sub	ebx,eax
 		mov	[word struct_def+eax],bx
-		mov	ebx,[@@offset]			;patch size_of_struct
+		mov	ebx,[@@offset]			;patch size_of_struct_memory
 		mov	[dword struct_def+2+eax],ebx
 
 		ret
@@ -7100,7 +7145,7 @@ check_setup_symbol:
 		push	ecx			;check if symbol defined
 		push	edi
 		lea	edi,[symbol]
-		mov	ecx,symbol_limit+1
+		mov	ecx,symbol_size_limit+1
 	rep	movsb
 		call	find_symbol
 		cmp	al,type_undefined
@@ -7154,7 +7199,7 @@ insert_interpreter:
 		je	@@nodebug
 		add	eax,4000h
 @@nodebug:
-		cmp	eax,obj_limit		;verify that everything fits
+		cmp	eax,obj_size_limit	;verify that everything fits
 		jae	error_pex
 
 		mov	eax,[size_var]		;set var_longs
@@ -7171,15 +7216,15 @@ insert_interpreter:
 
 		cmp	[debug_mode],0		;if not debug mode, force NOP instructions
 		jne	@@debugmode
-		mov	[dword obj+@@_debugnop1_],0
-		mov	[dword obj+@@_debugnop2_],0
-		mov	[dword obj+@@_debugnop3_],0
+		mov	[dword obj+@@debugnop+0],0
+		mov	[dword obj+@@debugnop+4],0
+		mov	[dword obj+@@debugnop+8],0
 		jmp	@@notdebugmode
 @@debugmode:	movzx	eax,[debug_pin_rx]	;debug mode, install debug_pin_rx into instructions
-		or	[dword obj+@@_debugnop2_],eax
+		or	[dword obj+@@debugnop+4],eax
 		shl	eax,9
-		or	[dword obj+@@_debugnop1_],eax
-		or	[dword obj+@@_debugnop3_],eax
+		or	[dword obj+@@debugnop+0],eax
+		or	[dword obj+@@debugnop+8],eax
 @@notdebugmode:
 		ret
 
@@ -7190,9 +7235,7 @@ insert_interpreter:
 @@var_longs	=	3Ch
 @@clkmode_hub	=	40h
 @@clkfreq_hub	=	44h
-@@_debugnop1_	=	0F20h
-@@_debugnop2_	=	0F24h
-@@_debugnop3_	=	0F28h
+@@debugnop	=	0F2Ch
 
 interpreter:	include	"Spin2_interpreter.inc"
 interpreter_end:
@@ -7479,8 +7522,8 @@ move_obj_up:	push	ecx
 		add	edi,ecx
 		dec	edi
 
-		add	[obj_ptr],eax		;make sure within obj_limit
-		cmp	[obj_ptr],obj_limit
+		add	[obj_ptr],eax		;make sure within obj_size_limit
+		cmp	[obj_ptr],obj_size_limit
 		ja	error_pex
 
 		std				;move obj upwards
@@ -7657,7 +7700,7 @@ determine_clock:
 
 
 @@findsymbol:	lea	edi,[symbol]		;find symbol and set 'defined' flag if found
-		mov	ecx,symbol_limit+1
+		mov	ecx,symbol_size_limit+1
 	rep	movsb
 		call	find_symbol
 		cmp	al,type_undefined
@@ -7669,7 +7712,7 @@ determine_clock:
 		ret
 
 @@entersymbol:	lea	edi,[symbol2]		;enter symbol
-		mov	ecx,symbol_limit+1
+		mov	ecx,symbol_size_limit+1
 	rep	movsb
 		jmp	enter_symbol2_print
 
@@ -8255,7 +8298,7 @@ distill_rebuild:
 		ret
 
 
-dbx		@@rebuild,obj_limit
+dbx		@@rebuild,obj_size_limit
 ;
 ;
 ; Reconnect any sub-objects
@@ -8337,6 +8380,16 @@ reset_element:	xor	eax,eax
 ;
 ; Get element
 ;
+; on entry:     source_ptr = source pointer
+;
+; on exit:      eax = element type
+;               ebx = element value
+;               source_start = element start
+;               source_finish = element finish
+;               source_ptr = new source pointer
+;
+;               if eof, c=1
+;
 get_element:	push	ecx
 		push	edx
 		push	esi
@@ -8414,7 +8467,7 @@ get_element:	push	ecx
 		jmp	@@skip			;continue on next line
 @@not3dot:
 		call	check_word_chr		;symbol?
-		mov	cl,symbol_limit+1
+		mov	cl,symbol_size_limit+1
 		jnc	@@sym2
 
 		shl	eax,8			;may be non-word symbol, store 1st chr
@@ -9392,6 +9445,21 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		mov	ebx,eax
 		jmp	@@okay
 @@nottrunc:
+		cmp	al,type_sizeof		;SIZEOF(struct)?
+		jne	@@notsizeof
+		cmp	[con_block_flag],1	;not allowed in CON block
+		je	error_soioa
+		cmp	[obj_block_flag],1	;not allowed in OBJ block
+		je	error_soioa
+		call	@@checkint
+		call	get_left		;get '('
+		call	get_element_obj		;get type_con_struct
+		call	check_con_struct_size	;get struct size into eax, z=0 if not type_con_struct
+		jne	error_easn		;error if not type_con_struct
+		call	get_right		;get ')'
+		mov	ebx,eax
+		jmp	@@okay
+@@notsizeof:
 		test	[exp_flags],10b		;if operand mode, check for local symbol
 		jz	@@notop
 		call	check_local
@@ -9453,7 +9521,7 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		cmp	ebx,10h shl 2		;must be within first 16
 		jae	@@locerror
 		shr	ebx,2			;make into long index
-		add	ebx,inline_locals	;add inline_locals
+		add	ebx,inline_locals_base	;add inline-locals register base
 		jmp	@@okay
 @@locerror:	jmp	error_lvmb
 @@notinline:
@@ -9588,6 +9656,12 @@ perform_unary:	xor	eax,eax			;if undefined flag, return 0
 		dd	offset @@fsqrt
 		dd	offset @@qlog
 		dd	offset @@qexp
+		dd	offset @@log2
+		dd	offset @@log10
+		dd	offset @@log
+		dd	offset @@exp2
+		dd	offset @@exp10
+		dd	offset @@exp
 		dd	offset @@shr
 		dd	offset @@shl
 		dd	offset @@sar
@@ -9613,6 +9687,7 @@ perform_unary:	xor	eax,eax			;if undefined flag, return 0
 		dd	offset @@fadd
 		dd	offset @@sub
 		dd	offset @@fsub
+		dd	offset @@pow
 		dd	offset @@fge
 		dd	offset @@fle
 		dd	offset @@addbits
@@ -9707,18 +9782,23 @@ perform_unary:	xor	eax,eax			;if undefined flag, return 0
 
 ddx		@@t
 
-@@fsqrt:	cmp	eax,80000000h		;fsqrt
-		ja	error_fpcmbp
-		and	eax,7FFFFFFFh		;accommodate -0.0 ($80000000)
-		call	fp_sqrt
-		jc	error_fpo
-		ret
+@@fsqrt:	jmp	fp_sqrt			;fsqrt
 
-@@qlog:		clc				;qlog
-		jmp	resolve_hyp
+@@qlog:		jmp	cordic_qlog		;qlog
 
-@@qexp:		stc				;qexp
-		jmp	resolve_hyp
+@@qexp:		jmp	cordic_qexp		;qexp
+
+@@log2:		jmp	fp_log2			;log2
+
+@@log10:	jmp	fp_log10		;log10
+
+@@log:		jmp	fp_log			;log
+
+@@exp2:		jmp	fp_exp2			;exp2
+
+@@exp10:	jmp	fp_exp10		;exp10
+
+@@exp:		jmp	fp_exp			;exp
 
 @@shr:		shr	eax,cl			;shr
 		ret
@@ -9853,6 +9933,10 @@ ddx		@@t
 		ret
 
 
+@@pow:		mov	ebx,ecx			;pow
+		jmp	fp_pow
+
+
 @@fge:		jz	@@fgefp			;fge, float?
 
 		cmp	eax,ecx			;fge integer
@@ -9895,7 +9979,7 @@ ddx		@@t
 @@lt:		mov	dl,001b			;lt
 		jmp	@@cmp
 
-@@flt:		cmp	dl,001			;flt
+@@flt:		mov	dl,001b			;flt
 		jmp	@@fcmp
 
 @@ltu:		mov	dl,001b			;ltu
@@ -9985,34 +10069,34 @@ ddx		@@t
 		mov	al,100b			;equal
 @@cmp3:		and	dl,al
 		movzx	eax,dl
-		jmp	@@log
+		jmp	@@logic
 
 
-@@lognot:	call	@@log			;lognot
+@@lognot:	call	@@logic			;lognot
 		not	eax
 		ret
 
 
-@@logand:	call	@@log			;logand
+@@logand:	call	@@logic			;logand
 		and	eax,ecx
 		ret
 
-@@logxor:	call	@@log			;logxor
+@@logxor:	call	@@logic			;logxor
 		xor	eax,ecx
 		ret
 
-@@logor:	call	@@log			;logor
+@@logor:	call	@@logic			;logor
 		or	eax,ecx
 		ret
 
 
-@@log:		or	eax,eax			;make eax and ecx logical
-		jz	@@log2			;non-0 becomes $FFFFFFFF (-1)
+@@logic:	or	eax,eax			;make eax and ecx logical
+		jz	@@logic2			;non-0 becomes $FFFFFFFF (-1)
 		mov	eax,0FFFFFFFFh
-@@log2:		or	ecx,ecx
-		jz	@@log3
+@@logic2:	or	ecx,ecx
+		jz	@@logic3
 		mov	ecx,0FFFFFFFFh
-@@log3:		ret
+@@logic3:	ret
 ;
 ;
 ; Expression resolver stack
@@ -10021,12 +10105,18 @@ matsize		=	10h			;math stack size (long)
 ddx		mat,matsize			;math stack
 ;
 ;
-; QLOG/QEXP resolver
+; Cordic QLOG/QEXP resolver
 ;
-; C=0 for QLOG
-; C=1 for QEXP
-;
-resolve_hyp:	rcl	[@@exp],1		;store mode
+cordic_qlog:	clc
+		jmp	cordic_q
+
+cordic_qexp:	stc
+
+cordic_q:	push	ebx
+		push	ecx
+		push	edx
+
+		rcl	[@@exp],1		;store mode
 
 		test	[@@exp],1		;qlog or qexp pre-fix?
 		jnz	@@exp_pre
@@ -10158,7 +10248,7 @@ resolve_hyp:	rcl	[@@exp],1		;store mode
 		mov	eax,0FFFFFFFFh
 		mov	edx,eax
 @@log_post:	mov	cl,8
-		jmp	@@sar			;qlog done
+		jmp	@@done
 
 @@exp_post:	mov	eax,[@@x+0]		;qexp post-fix
 		mov	edx,[@@x+4]
@@ -10167,7 +10257,12 @@ resolve_hyp:	rcl	[@@exp],1		;store mode
 		add	eax,20h
 		adc	edx,0
 		mov	cl,7
-		jmp	@@sar			;qexp done
+@@done:		call	@@sar
+
+		pop	edx
+		pop	ecx
+		pop	ebx
+		ret
 
 
 @@sec_next:	inc	cl			;cordic iteration
@@ -10316,6 +10411,14 @@ ddx		@@zd,2
 ;	fp_sub		- subtract ebx from eax
 ;	fp_mul		- multiply ebx into eax
 ;	fp_div		- divide eax into ebx
+;	fp_pow		- raise eax to the power of ebx
+;
+;	fp_log2		- get log2 of eax
+;	fp_log10	- get log2 of eax
+;	fp_log		- get log2 of eax
+;	fp_exp2		- get log2 of eax
+;	fp_exp10	- get log2 of eax
+;	fp_exp		- get log2 of eax
 ;
 ;	fp_float	- convert eax integer to float
 ;	fp_round	- convert eax float to rounded integer
@@ -10480,13 +10583,26 @@ fp_div:		push	edx
 		ret
 ;
 ;
-; Floating-point square-root (FSQRT(fp eax) -> fp eax)
+; Floating-point power (fp eax to-the-power-of fp ebx --> fp eax)
+;
+fp_pow:		push	ebx
+		call	fp_log2
+		pop	ebx
+		call	fp_mul
+		jc	error_fpo
+		jmp	fp_exp2
+;
+;
+; Floating-point square-root (FSQRT(fp eax) --> fp eax)
 ; c=1 if overflow
 ;
 fp_sqrt:	push	ecx
 		push	edx
 		push	esi
 		push	edi
+
+		cmp	eax,80000000h		;negative numbers not allowed
+		ja	error_fpcmbp
 
 		call	fp_unpack_eax		;unpack float
 
@@ -10513,6 +10629,7 @@ fp_sqrt:	push	ecx
 @@zero:
 		xor	edx,edx			;clear sign in dl.0
 		call	fp_pack_eax		;pack float, c=1 if overflow
+		jc	error_fpo
 
 		pop	edi
 		pop	esi
@@ -10524,7 +10641,153 @@ fp_sqrt:	push	ecx
 ddx		@@sqr
 ;
 ;
-; Convert integer to floating-point (int eax -> fp eax)
+; Floating-point logarithms (LOG2/LOG10/LOG(fp eax) --> fp eax)
+; c=1 if overflow
+;
+fp_log2:	xor	ebx,ebx			;log2, no result scaling
+		jmp	fp_logx
+
+fp_log10:	mov	ebx,04D104D42h		;log10 (log2 --> log10)		2^32 * log10(2.0)
+		jmp	fp_logx
+
+fp_log:		mov	ebx,0B17217F8h		;log (log2 --> log)		2^32 * log(2.0)
+
+fp_logx:	push	ecx
+		push	edx
+		push	esi
+		push	edi
+
+		call	fp_unpack_eax		;unpack float
+
+		test	dl,1			;cannot be negative
+		jnz	error_fpcmbp
+		or	eax,eax			;cannot be zero
+		jz	error_fpcmbp
+
+		call	cordic_qlog		;perform QLOG on mantissa
+		shl	eax,5			;bit31-justify log mantissa
+
+		sub	esi,127			;unbias exponent
+		jns	@@pos			;if exponent < 0, (must check sign, not carry, because it could have started negative)
+		or	dl,1			;..set negative
+		not	esi			;..not exponent
+		not	eax			;..not mantissa
+@@pos:
+		mov	ecx,8			;get number of exponent bits to head mantissa (8..1)
+		mov	edi,80h
+@@int:		test	esi,edi
+		jnz	@@gotint
+		shr	edi,1
+		loop	@@int
+		inc	ecx			;if exponent was 0, single bit
+@@gotint:
+		shr	eax,cl			;make room at mantissa head
+		ror	esi,cl			;position exponent bits at mantissa head
+		or	eax,esi			;or exponent bits into mantissa
+		shr	eax,3			;bit-28 justify mantissa
+
+		or	ebx,ebx			;log10/log?
+		jz	@@noadj
+		push	edx			;adjust to another log base
+		mul	ebx
+		mov	eax,edx
+		pop	edx
+@@noadj:
+		mov	esi,ecx			;get exponent
+		add	esi,127			;bias exponent
+
+		call	fp_pack_eax		;pack float
+
+		pop	edi
+		pop	esi
+		pop	edx
+		pop	ecx
+		ret
+;
+;
+; Floating-point exponentials (EXP2/EXP10/EXP(fp eax) --> fp eax)
+; c=1 if overflow
+;
+fp_exp2:	xor	ebx,ebx			;exp2, no input scaling
+		jmp	fp_expn
+
+fp_exp10:	mov	ebx,0D49A784Ch		;exp10 (exp2 --> exp10)		2^30 / log10(2.0)
+		jmp	fp_expn
+
+fp_exp:		mov	ebx,05C551D95h		;exp (exp2 --> exp)		2^30 / log(2.0)
+
+fp_expn:	push	ecx
+		push	edx
+		push	esi
+		push	edi
+
+		call	fp_unpack_eax		;unpack float
+
+		sub	esi,127			;unbias exponent
+
+		or	ebx,ebx			;exp10/exp?
+		jz	@@noadj
+
+		push	edx			;adjust to another exp base
+		mul	ebx
+		shld	edx,eax,2		;shift result by two to compensate for 2<<30, making 2<<32
+		mov	eax,edx
+		pop	edx
+
+		test	eax,80000000h		;bit29-justify mantissa
+		jz	@@ok31
+		shr	eax,1
+		inc	esi
+@@ok31:
+		test	eax,40000000h		;bit29-justify mantissa
+		jz	@@ok30
+		shr	eax,1
+		inc	esi
+@@ok30:
+@@noadj:
+		shl	eax,2			;shift mantissa left to msb-justify
+
+		add	esi,1			;get number of whole exponent bits in mantissa head
+
+		cmp	esi,8			;exponent bits cannot exceed +8
+		jg	error_fpo
+
+		mov	ecx,esi			;any whole exponent bits in mantissa?
+		cmp	ecx,1
+		jl	@@shiftdown
+
+		xor	esi,esi			;extract whole exponent bits from mantissa
+		shld	esi,eax,cl		;these bits form new exponent
+		shl	eax,cl			;msb-justify fractional exponent in mantissa
+		jmp	@@cont
+
+@@shiftdown:	neg	ecx			;no whole exponent bits in mantissa
+		shr	eax,cl			;shift fractional exponent in mantissa down
+		mov	esi,0			;set exponent to 0
+@@cont:
+		test	dl,1			;if negative
+		jz	@@pos
+		mov	dl,0			;..set positive
+		not	esi			;..not exponent
+		not	eax			;..not mantissa
+@@pos:
+		shr	eax,5			;make bit29-justified QEXP value
+		or	eax,29 shl 27
+		call	cordic_qexp		;perform QEXP on mantissa
+
+		add	esi,127			;bias exponent
+
+		call	fp_pack_eax		;pack float, c=1 if overflow
+		jc	error_fpo
+
+		pop	edi
+		pop	esi
+		pop	edx
+		pop	ecx
+		ret
+;
+;
+; Convert integer to floating-point (int eax --> fp eax)
 ;
 fp_float:	push	edx
 		push	esi
@@ -10552,7 +10815,7 @@ fp_float:	push	edx
 		ret
 ;
 ;
-; Convert float to rounded/truncated integer (fp eax -> int eax)
+; Convert float to rounded/truncated integer (fp eax --> int eax)
 ; c=1 if overflow
 ;
 fp_round:	stc
@@ -10610,6 +10873,7 @@ fp_unpack_eax:	shl	eax,1			;get sign a
 		shr	esi,24
 
 		shl	eax,8			;get mantissa a
+
 		or	esi,esi			;if exponent not 0, add msb
 		jnz	@@nz
 
@@ -10640,6 +10904,7 @@ fp_unpack_ebx:	shl	ebx,1			;get sign b
 		shr	edi,24
 
 		shl	ebx,8			;get mantissa b
+
 		or	edi,edi			;if exponent not 0, add msb
 		jnz	@@nz
 
@@ -10671,12 +10936,7 @@ fp_pack_eax:	or	eax,eax			;if mantissa 0, result 0, c=0
 		shl	eax,1
 		jnc	@@exp
 
-		push	eax			;check for even mantissa and 0.500 fraction
-		and	eax,3FFh
-		cmp	eax,100h
-		pop	eax
-		jz	@@skip			;if even and 0.500, skip rounding
-		add	eax,100h		;round up by 0.500
+		add	eax,100h		;round up mantissa by 0.5
 		adc	esi,0			;account for overflow
 @@skip:
 		cmp	esi,0			;if exponent > 0, pack result
@@ -12009,20 +12269,20 @@ ci_send:	call	get_left		;get '('
 		ret
 ;
 ;
-; Compile ORG inline assembly section - first handle ORG operand(s)
+; Compile ORG inline assembly block - first handle ORG operand(s)
 ;
 compile_org:	mov	ecx,000h		;ready default cog origin
-		mov	edx,inline_limit	;ready default cog origin limit
+		mov	edx,inline_org_limit	;ready default cog origin limit
 		call	check_end		;if end, use defaults
 		je	@@org
 		call	get_value_int		;get cog origin value
-		cmp	ebx,inline_limit
+		cmp	ebx,inline_org_limit
 		ja	error_icaexl
 		mov	ecx,ebx
 		call	check_comma		;check for comma
 		jne	@@orgend
 		call	get_value_int		;get cog origin limit value
-		cmp	ebx,inline_limit
+		cmp	ebx,inline_org_limit
 		ja	error_icaexl
 		mov	edx,ebx
 @@orgend:	call	get_end			;get end
@@ -12046,11 +12306,11 @@ compile_org:	mov	ecx,000h		;ready default cog origin
 		mov	[inline_cog_org_limit],edx
 
 		mov	[orgh],0		;set org mode
-		call	compile_inline_section	;compile inline section
+		call	compile_inline_block	;compile inline block
 
 		pop	ebx			;get original obj_ptr
 
-@@pad:		mov	eax,ebx			;make inline section a whole number of longs
+@@pad:		mov	eax,ebx			;make inline block a whole number of longs
 		xor	eax,[obj_ptr]
 		and	al,11b
 		jz	@@long
@@ -12062,7 +12322,7 @@ compile_org:	mov	ecx,000h		;ready default cog origin
 		sub	ecx,ebx
 		shr	ecx,2
 
-		jz	error_isie		;if inline section is empty, error
+		jz	error_isie		;if inline block is empty, error
 
 		dec	ecx			;store number of longs minus 1 into placeholder
 		mov	[word obj-2+ebx],cx
@@ -12070,7 +12330,7 @@ compile_org:	mov	ecx,000h		;ready default cog origin
 		ret
 ;
 ;
-; Compile ORGH inline assembly section
+; Compile ORGH inline assembly block
 ;
 compile_orgh:	call	get_end			;get end
 
@@ -12088,11 +12348,11 @@ compile_orgh:	call	get_end			;get end
 		mov	[inline_cog_org_limit],1F8h shl 2
 
 		mov	[orgh],1		;set orgh mode
-		call	compile_inline_section	;compile inline section
+		call	compile_inline_block	;compile inline block
 
 		pop	ebx			;get original obj_ptr
 
-@@pad:		mov	eax,ebx			;make inline section a whole number of longs
+@@pad:		mov	eax,ebx			;make inline block a whole number of longs
 		xor	eax,[obj_ptr]
 		and	al,11b
 		jz	@@long
@@ -12104,7 +12364,7 @@ compile_orgh:	call	get_end			;get end
 		sub	ecx,ebx
 		shr	ecx,2
 
-		jz	error_isie		;if inline section is empty, error
+		jz	error_isie		;if inline block is empty, error
 		cmp	ecx,0FFFFh
 		ja	error_isil
 
@@ -12145,11 +12405,9 @@ compile_var_multi:
 		call	check_comma
 		je	@@scan
 
-
 		call	get_assign		;get ":='
 
 		call	compile_parameters_np	;compile parameters (long count in ecx)
-
 
 		mov	ecx,edx			;get variable count
 		mov	edx,[source_ptr]	;remember source_ptr
@@ -12165,6 +12423,7 @@ compile_var_multi:
 		mov	al,bc_pop_rfvar
 		call	enter_obj
 		pop	eax
+		dec	eax			;account for final manual long pop in interpreter
 		shl	eax,2
 		call	compile_rfvar
 		jmp	@@cont
@@ -12180,20 +12439,20 @@ compile_var_multi:
 		ret
 ;
 ;
-; Check al for '_' or '_(type_con_int|type_con_struct)'
+; Check al for '_' or '_[type_con_int|type_con_struct]'
 ; on entry, al=type, ebx=value
-; on exit, z=1 if '_' or '_(type_con_int|type_con_struct)' with enveloping long count in eax
+; on exit, z=1 if '_' or '_[type_con_int|type_con_struct]' with enveloping long count in eax
 ;
 check_write_skip:
 
 		call	check_under		;if not '_', exit with z=0
 		jne	@@not
 
-		call	check_left		;got '_', check for '('
+		call	check_leftb		;got '_', check for '['
 		mov	eax,1
 		jne	@@got			;if just '_', single long
 
-		call	get_element_obj		;got '_(', check for integer constant
+		call	get_element_obj		;got '_[', check for integer constant
 		cmp	al,type_con_int
 		jne	@@notint
 		mov	eax,ebx
@@ -12217,7 +12476,7 @@ check_write_skip:
 		add	eax,11b			;get enveloping long count
 		shr	eax,2
 
-@@gotint:	call	get_right		;get ')'
+@@gotint:	call	get_rightb		;get ']'
 
 @@got:		cmp	al,al			;z=1
 
@@ -12381,8 +12640,8 @@ ci_debug:	mov	[debug_first],1		;set first flag
 		mov	[@@tickmode],0		;reset tick mode
 		mov	[@@stack],0		;reset run-time stack depth
 
-		call	check_debug		;if debug disabled, scan to end of line
-		jne	scan_to_end
+		call	check_debug		;if debug disabled, skip to end of line
+		jne	skip_to_end
 
 		call	check_left		;debug enabled, check for '('
 		je	@@left
@@ -13721,7 +13980,7 @@ ct_method_ptr:	push	edx			;remember source ptr for variable
 
 		mov	edx,ecx			;remember result requirement in dh and bc_drop_? in dl
 
-		call	get_method_ptr		;get method pointer
+		call	get_method_ptr_var	;get method pointer
 
 		cmp	ch,type_register	;if RECV(), no parameters allowed, one return value
 		jne	@@notrecv
@@ -13753,13 +14012,8 @@ ct_method_ptr:	push	edx			;remember source ptr for variable
 
 		call	compile_parameters_mptr	;compile parameters for method pointer
 
-		call	check_colon		;check for ':'
-		mov	ebx,0
-		jne	@@noresults
-		call	get_con_int		;get number of results
-		cmp	ebx,results_limit
-		ja	error_loxre
-@@noresults:	shl	ebx,20			;single result required?
+		call	get_colon_result_count	;check for colon and result count, ebx = count
+		shl	ebx,20			;single result required?
 
 		pop	[source_finish]		;in case error, restore source pointers to show variable name
 		pop	[source_start]
@@ -13773,7 +14027,7 @@ ct_method_ptr:	push	edx			;remember source ptr for variable
 		call	compile_var_read
 		pop	[source_ptr]
 
-		mov	al,bc_call_ptr		;(call method ptr)
+		mov	al,bc_call_ptr		;(call method pointer)
 		jmp	enter_obj
 ;
 ;
@@ -13872,7 +14126,7 @@ ct_cogspin_taskspin:
 
 
 @@method_ptr:	mov	[source_ptr],edx	;method pointer, confirm long variable
-		call	get_method_ptr
+		call	get_method_ptr_var
 
 		call	compile_parameters_mptr	;compile parameters, returns parameter count in ecx
 		push	ecx			;push parameter count
@@ -14473,15 +14727,37 @@ get_comma_or_end:
 		ret
 ;
 ;
-; Get integer constant
+; Get colon result count in ebx
 ; ebx = constant
 ;
-get_con_int:	push	eax
+get_colon_result_count:
 
-		call	get_element_obj
-		cmp	al,type_con_int
-		jne	error_eicon
+		push	eax
+		push	ecx
+		push	esi
+		push	edi
 
+		call	check_colon			;if no colon, return 0
+		mov	ebx,0
+		jne	@@got
+
+		call	get_element_obj			;get element
+
+		cmp	al,type_con_int			;constant?
+		je	@@got				;got size
+
+		call	check_con_struct_size		;con struct?
+		jne	error_eiconos
+		mov	ebx,eax				;get size in longs
+		add	ebx,3
+		shr	ebx,2
+
+@@got:		cmp	ebx,method_results_limit	;check result count
+		ja	error_loxre
+
+		pop	edi
+		pop	esi
+		pop	ecx
 		pop	eax
 		ret
 ;
@@ -14640,7 +14916,7 @@ check_struct_stack_fit:
 		ret
 ;
 ;
-; Scan to ']'
+; Scan to ']' with nesting
 ;
 scan_to_rightb:	push	eax
 		push	ebx
@@ -14670,7 +14946,7 @@ scan_to_rightb:	push	eax
 		ret
 ;
 ;
-; Scan to ')'
+; Scan to ')' with nesting
 ;
 scan_to_right:	push	eax
 		push	ebx
@@ -14700,16 +14976,37 @@ scan_to_right:	push	eax
 		ret
 ;
 ;
-; Scan to end of line
+; Skip to end of line
 ;
-scan_to_end:	push	eax
+skip_to_end:	push	eax
 		push	ebx
 
-@@scan:		call	get_element		;scan to end of line
+@@skip:		call	get_element		;skip to end of line
 		cmp	al,type_end
-		jne	@@scan
+		jne	@@skip
 
 		call	back_element		;back up to end of line
+
+		pop	ebx
+		pop	eax
+		ret
+
+;
+;
+; Skip to comma or end of line
+;
+skip_to_comma_or_end:
+
+		push	eax
+		push	ebx
+
+@@scan:		call	get_element		;get next element
+		cmp	al,type_comma		;comma?
+		je	@@got
+		cmp	al,type_end		;end of line?
+		jne	@@scan
+@@got:
+		call	back_element		;back up to comma or end of line
 
 		pop	ebx
 		pop	eax
@@ -14734,7 +15031,7 @@ check_local:	cmp	al,type_colon		;if colon or dot, local symbol
 		pop	[source_start]
 		jc	error_eals		;if no symbol, error
 
-		cmp	cl,symbol_limit-1	;check symbol size
+		cmp	cl,symbol_size_limit-1	;check symbol size
 		ja	error_sexc
 
 		lea	edi,[symbol+ecx]	;append local digits and 0
@@ -15170,7 +15467,7 @@ enter_obj_word:	call	enter_obj
 enter_obj:	push	edi
 
 		mov	edi,[obj_ptr]
-		cmp	edi,obj_limit
+		cmp	edi,obj_size_limit
 		jae	error_pex
 
 		inc	[obj_ptr]
@@ -15348,7 +15645,7 @@ compile_parameters_mptr:
 
 @@param:	call	compile_parameter	;compile parameters
 		add	ecx,eax
-		cmp	ecx,params_limit
+		cmp	ecx,method_params_limit
 		ja	error_loxpe
 		call	get_comma_or_right
 		je	@@param
@@ -15360,7 +15657,8 @@ compile_parameters_mptr:
 ; Compile a parameter - accommodates structure pushes and instructions/methods with multiple return values
 ; on exit, eax holds number of actual structure longs or parameters compiled
 ;
-;	structure{[]}{.substructure{[]}}	- must be 15 or fewer longs, else error
+;	structure{[]}{.substructure{[]}}				- must be 15 or fewer longs, else error
+;	structure{[]}{.substructure{[]}}.long{[]}({params,...}):2+
 ;	rotxy/polxy/xypol
 ;	obj{[]}.method({params,...})
 ;	method({params,...})
@@ -15377,15 +15675,19 @@ compile_parameter:
 
 		call	get_element_obj		;get element to check
 
-		push	[source_ptr]		;check for structure > long that is not followed by "==" or "<>"
-		call	check_var
+		call	is_struct			;structure?
 		jne	@@notstruct
-		call	is_struct		;structure{[]}{.substructure{[]}}{.member{[]}}?
-		jne	@@notstruct
-		pop	eax			;structure, pop source pointer
-		cmp	[compiled_struct_flags],3	;if byte/word/long member, single parameter
-		je	@@single
-		cmp	[compiled_struct_size],4	;if structure fits in a long, single parameter
+		call	check_var			;get structure{[]}{.substructure{[]}}{.member{[]}}
+		cmp	[compiled_struct_flags],3	;structure or byte/word/long member
+		jne	@@struct
+		call	check_left			;byte/word/long member, check for '(' indicating method pointer
+		jne	@@single			;if no, '(', single parameter
+		pop	eax				;get initial element again, without calling check_var
+		push	eax
+		mov	[source_ptr],eax
+		call	get_element
+		jmp	@@chkvarmethod			;try as method pointer, must be long
+@@struct:	cmp	[compiled_struct_size],4	;structure, if fits in a long, single parameter
 		jbe	@@single
 		call	get_element			;if "==" or "<>" follows, single parameter
 		cmp	al,type_op
@@ -15398,12 +15700,11 @@ compile_parameter:
 		mov	eax,[compiled_struct_size]	;structure > long, get long count to push
 		add	eax,11b
 		shr	eax,2
-		mov	dl,0			;compile structure read/push (checks struct size)
+		mov	dl,0				;compile structure read/push (checks struct size)
 		call	compile_var
-		pop	ebx			;pop source pointer
+		pop	ebx				;pop source pointer
 		jmp	@@exit
-@@notstruct:	pop	[source_ptr]
-
+@@notstruct:
 		cmp	al,type_i_flex		;flex instruction?
 		jne	@@notflex
 		movzx	ecx,bh			;multiple return values?
@@ -15435,7 +15736,7 @@ compile_parameter:
 		mov	esi,offset ct_method
 		je	@@checkmult
 
-		call	check_var_method	;var({params,...}){:returns} ?
+@@chkvarmethod:	call	check_var_method	;var({params,...}){:returns} ?
 		jne	@@single		;if not var method, compile as expression
 		mov	esi,offset ct_method_ptr
 		jmp	@@checkmult2
@@ -15576,12 +15877,8 @@ check_var_method:
 		jmp	@@is
 @@notsend:
 		call	scan_to_right		;skip parameters to ')'
-		call	check_colon		;check for ':'
-		mov	ebx,0			;if no colon, no return value
-		jne	@@is
-		call	get_con_int		;got ':', get return value count
-		cmp	ebx,results_limit
-		ja	error_loxre
+
+		call	get_colon_result_count	;check for colon and result count, ebx = count
 
 @@is:		cmp	eax,eax			;is var method, z=1
 
@@ -15595,7 +15892,9 @@ check_var_method:
 ;
 ; Get method pointer variable - must be long/reg without bitfield
 ;
-get_method_ptr:	call	get_element_obj		;get variable name (may be type_obj_con_struct --> type_con_struct)
+get_method_ptr_var:
+
+		call	get_element_obj		;get variable name (may be type_obj_con_struct --> type_con_struct)
 		push	[source_start]		;push source pointers in case error
 		push	[source_finish]
 		call	back_element
@@ -15605,6 +15904,14 @@ get_method_ptr:	call	get_element_obj		;get variable name (may be type_obj_con_st
 		test	ecx,var_bitfield_flag	;no bitfield allowed
 		jnz	@@exit
 
+		mov	al,ch			;structure long member is allowed
+		call	is_struct
+		jne	@@notstruct
+		cmp	[compiled_struct_flags],3
+		jne	@@notstruct
+		cmp	[compiled_struct_word_size],2
+		je	@@exit
+@@notstruct:
 		cmp	cl,2			;long hub variable is allowed
 		je	@@exit
 
@@ -16170,14 +16477,14 @@ compile_var:	push	eax
 		cmp	ch,type_register	;register?
 		jne	@@notreg
 
-		cmp	esi,pasm_regs+0		;pasm_regs 0..7 with no index?
+		cmp	esi,prx_regs+0		;pr0..pr7 with no index?
 		jb	@@notregpasm
-		cmp	esi,pasm_regs+7
+		cmp	esi,prx_regs+7
 		ja	@@notregpasm
 		test	ecx,var_index_flag	;index?
 		jnz	@@notregpasm
 		mov	eax,esi			;enter setup $1F8..$1FF bytecode
-		sub	eax,pasm_regs
+		sub	eax,prx_regs
 		add	eax,bc_setup_reg_1D8_1F8+0
 		jmp	@@entersetup
 @@notregpasm:
@@ -16274,19 +16581,6 @@ compile_var:	push	eax
 		cmp	ch,type_hub_byte	;hub byte/word/long with possible index?
 		jne	@@nothub
 
-		cmp	dl,0			;read CLKFREQ with no index nor bitfield?
-		jne	@@notrdclkfreq
-		cmp	cl,2			;long?
-		jne	@@notrdclkfreq
-		cmp	esi,clkfreq_address	;CLKFREQ address?
-		jne	@@notrdclkfreq
-		test	ecx,var_index_flag or var_bitfield_flag		;no index or bitfield?
-		jnz	@@notrdclkfreq
-		mov	al,bc_hub_bytecode	;hub bytecode
-		call	enter_obj
-		mov	al,bc_read_clkfreq	;read-clkfreq bytecode
-		jmp	@@enter
-@@notrdclkfreq:
 		push	ebx			;compile address
 		mov	ebx,esi
 		call	compile_constant
@@ -16761,19 +17055,17 @@ compile_struct_setup:
 		jz	@@indexcon
 		inc	[@@index_count]			;[exp], limit reached?
 		cmp	[@@index_count],3
-		ja	error_loxriee
+		ja	error_loxrs
 		jmp	get_rightb
 
 @@indexcon:	mov	eax,[con_value]			;[con], check range
 		cmp	eax,0FFFFh
 		ja	error_simbf
 		mul	[@@size]			;multiply by size and add to offset
-		or	edx,edx
-		jnz	@@error_sehr
-		cmp	eax,obj_limit
+		cmp	eax,obj_size_limit
 		ja	@@error_sehr
 		add	[@@offset],eax
-		cmp	[@@offset],obj_limit
+		cmp	[@@offset],obj_size_limit
 		ja	@@error_sehr
 		jmp	get_rightb
 
@@ -18694,7 +18986,7 @@ dbx		dd_sym_size
 dbx		dd_sym_exists
 ddx		dd_sym_exists_ptr,32
 
-dbx		dd_name,symbol_limit+2
+dbx		dd_name,symbol_size_limit+2
 
 ddx		debug_display_ptr
 ;
@@ -18914,7 +19206,7 @@ check_dd_sym:	mov	al,[esi]		;get initial chr
 @@chr:		lodsb				;gather symbol chrs
 		call	check_word_chr
 		jc	@@got
-		cmp	ah,symbol_limit		;if symbol length at limit, ignore extra chrs
+		cmp	ah,symbol_size_limit	;if symbol length at limit, ignore extra chrs
 		je	@@chr
 		stosb				;store chr into symbol
 		inc	ah			;inc symbol length
@@ -19150,8 +19442,8 @@ dbx		symbols_inline,symbols_limit_inline
 dbx		symbol_exists				;symbol-exists flag and ptr
 ddx		symbol_exists_ptr
 
-dbx		symbol,symbol_limit+2			;+2 for obj.method extra byte and 0
-dbx		symbol2,symbol_limit+2
+dbx		symbol,symbol_size_limit+2			;+2 for obj.method extra byte and 0
+dbx		symbol2,symbol_size_limit+2
 ;
 ;
 ; Enter preprocessor symbols into hashed symbol table
@@ -19239,6 +19531,11 @@ enter_symbols_level:
 		lea	esi,[level50_symbols]
 		call	enter_symbols
 @@not50:
+		cmp	[spin2_level],51
+		jb	@@not51
+		lea	esi,[level51_symbols]
+		call	enter_symbols
+@@not51:
 		ret
 ;
 ;
@@ -19611,7 +19908,7 @@ backup_symbol:	push	ecx
 
 		lea	esi,[symbol]
 		lea	edi,[symbol2]
-		mov	ecx,symbol_limit+2
+		mov	ecx,symbol_size_limit+2
 	rep	movsb
 
 		pop	edi
@@ -20600,14 +20897,14 @@ automatic_symbols:
 
 	sym	type_reg,		0,		'REG'		;reg
 
-	sym	type_register,		pasm_regs+0,	'PR0'		;pasm regs
-	sym	type_register,		pasm_regs+1,	'PR1'
-	sym	type_register,		pasm_regs+2,	'PR2'
-	sym	type_register,		pasm_regs+3,	'PR3'
-	sym	type_register,		pasm_regs+4,	'PR4'
-	sym	type_register,		pasm_regs+5,	'PR5'
-	sym	type_register,		pasm_regs+6,	'PR6'
-	sym	type_register,		pasm_regs+7,	'PR7'
+	sym	type_register,		prx_regs+0,	'PR0'		;pasm regs
+	sym	type_register,		prx_regs+1,	'PR1'
+	sym	type_register,		prx_regs+2,	'PR2'
+	sym	type_register,		prx_regs+3,	'PR3'
+	sym	type_register,		prx_regs+4,	'PR4'
+	sym	type_register,		prx_regs+5,	'PR5'
+	sym	type_register,		prx_regs+6,	'PR6'
+	sym	type_register,		prx_regs+7,	'PR7'
 
 	sym	type_register,		1F0h,		'IJMP3'		;interrupt vectors
 	sym	type_register,		1F1h,		'IRET3'
@@ -20952,6 +21249,19 @@ level47_symbols:
 level50_symbols:
 
 	sym	type_asm_dir,		dir_ditto,	'DITTO'
+
+	db	0
+
+
+level51_symbols:
+
+	sym	type_op,		oc_pow,		'POW'
+	sym	type_op,		oc_log2,	'LOG2'
+	sym	type_op,		oc_log10,	'LOG10'
+	sym	type_op,		oc_log,		'LOG'
+	sym	type_op,		oc_exp2,	'EXP2'
+	sym	type_op,		oc_exp10,	'EXP10'
+	sym	type_op,		oc_exp,		'EXP'
 
 	db	0
 ;

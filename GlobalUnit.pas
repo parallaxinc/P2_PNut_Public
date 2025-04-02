@@ -24,11 +24,11 @@ const
 
   HubLimit              = $80000;
 
-  ObjLimit              = $100000;
+  ObjSizeLimit          = $100000;
   ObjDataLimit          = $200000;
-  FileLimit             = 255;
-  PreSymbolLimit        = 16;
-  ObjParamLimit         = 16;
+  FilesLimit            = 255;
+  PreSymbolsLimit       = 16;
+  ObjParamsLimit        = 16;
   InfoLimit             = 2000;
   DebugDataLimit        = $4000;
   DebugStringLimit      = $8000;
@@ -39,7 +39,7 @@ const
   DocLimit              = 5000000;
 
   ObjStackLimit         = 16;
-  ObjFileLimit          = 4000;
+  ObjFilesLimit         = 4000;
 
 type
   TP2 = packed record
@@ -63,37 +63,37 @@ type
     DocLength:          integer;
 
     PreSymbols:         integer;
-    PreSymbolNames:     array[0..PreSymbolLimit*32-1] of byte;
+    PreSymbolNames:     array[0..PreSymbolsLimit*32-1] of byte;
 
     Params:             integer;
-    ParamNames:         array[0..ObjParamLimit*32-1] of byte;
-    ParamTypes:         array[0..ObjParamLimit-1] of byte;
-    ParamValues:        array[0..ObjParamLimit-1] of integer;
+    ParamNames:         array[0..ObjParamsLimit*32-1] of byte;
+    ParamTypes:         array[0..ObjParamsLimit-1] of byte;
+    ParamValues:        array[0..ObjParamsLimit-1] of integer;
 
-    Obj:                array[0..ObjLimit-1] of byte;
+    Obj:                array[0..ObjSizeLimit-1] of byte;
     ObjLength:          integer;
 
     ObjFiles:           integer;
-    ObjFilenames:       array[0..FileLimit*256-1] of byte;
-    ObjFilenamesStart:  array[0..FileLimit-1] of integer;
-    ObjFilenamesFinish: array[0..FileLimit-1] of integer;
-    ObjParams:          array[0..FileLimit-1] of integer;
-    ObjParamNames:      array[0..FileLimit*ObjParamLimit*32-1] of byte;
-    ObjParamTypes:      array[0..FileLimit*ObjParamLimit-1] of byte;
-    ObjParamValues:     array[0..FileLimit*ObjParamLimit-1] of integer;
-    ObjOffsets:         array[0..FileLimit-1] of integer;
-    ObjLengths:         array[0..FileLimit-1] of integer;
+    ObjFilenames:       array[0..FilesLimit*256-1] of byte;
+    ObjFilenamesStart:  array[0..FilesLimit-1] of integer;
+    ObjFilenamesFinish: array[0..FilesLimit-1] of integer;
+    ObjParams:          array[0..FilesLimit-1] of integer;
+    ObjParamNames:      array[0..FilesLimit*ObjParamsLimit*32-1] of byte;
+    ObjParamTypes:      array[0..FilesLimit*ObjParamsLimit-1] of byte;
+    ObjParamValues:     array[0..FilesLimit*ObjParamsLimit-1] of integer;
+    ObjOffsets:         array[0..FilesLimit-1] of integer;
+    ObjLengths:         array[0..FilesLimit-1] of integer;
     ObjData:            array[0..ObjDataLimit-1] of byte;
-    ObjInstances:       array[0..FileLimit-1] of integer;
+    ObjInstances:       array[0..FilesLimit-1] of integer;
     ObjTitle:           array[0..255] of byte;
 
     DatFiles:           integer;
-    DatFilenames:       array[0..FileLimit*256-1] of byte;
-    DatFilenamesStart:  array[0..FileLimit-1] of integer;
-    DatFilenamesFinish: array[0..FileLimit-1] of integer;
-    DatOffsets:         array[0..FileLimit-1] of integer;
-    DatLengths:         array[0..FileLimit-1] of integer;
-    DatData:            array[0..ObjLimit-1] of byte;
+    DatFilenames:       array[0..FilesLimit*256-1] of byte;
+    DatFilenamesStart:  array[0..FilesLimit-1] of integer;
+    DatFilenamesFinish: array[0..FilesLimit-1] of integer;
+    DatOffsets:         array[0..FilesLimit-1] of integer;
+    DatLengths:         array[0..FilesLimit-1] of integer;
+    DatData:            array[0..ObjSizeLimit-1] of byte;
 
     InfoCount:          integer;        // used by PropellerTool
     InfoStart:          array[0..InfoLimit-1] of integer;
@@ -178,8 +178,8 @@ var
 
   ObjFilePtr         : integer;
   ObjFileCount       : integer;
-  ObjFileOffsets     : array[0..ObjFileLimit-1] of integer;
-  ObjFileLengths     : array[0..ObjFileLimit-1] of integer;
+  ObjFileOffsets     : array[0..ObjFilesLimit-1] of integer;
+  ObjFileLengths     : array[0..ObjFilesLimit-1] of integer;
   ObjFileLastIndex   : integer;
 
   FontName           : string;

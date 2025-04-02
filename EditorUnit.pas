@@ -2464,21 +2464,21 @@ var
   match: boolean;
 
   Params: integer;
-  ParamNames: array[0..ObjParamLimit*32-1] of byte;
-  ParamTypes: array[0..ObjParamLimit-1] of byte;
-  ParamValues: array[0..ObjParamLimit-1] of integer;
+  ParamNames: array[0..ObjParamsLimit*32-1] of byte;
+  ParamTypes: array[0..ObjParamsLimit-1] of byte;
+  ParamValues: array[0..ObjParamsLimit-1] of integer;
 
   ObjFiles: integer;
   ObjFilename: string;
-  ObjFilenames: array[0..FileLimit-1] of string[32];
-  ObjFilenamesStart: array[0..FileLimit-1] of integer;
-  ObjFilenamesFinish: array[0..FileLimit-1] of integer;
-  ObjFileIndex: array[0..FileLimit-1] of integer;
+  ObjFilenames: array[0..FilesLimit-1] of string[32];
+  ObjFilenamesStart: array[0..FilesLimit-1] of integer;
+  ObjFilenamesFinish: array[0..FilesLimit-1] of integer;
+  ObjFileIndex: array[0..FilesLimit-1] of integer;
 
-  ObjParams: array[0..FileLimit-1] of integer;
-  ObjParamNames: array[0..FileLimit*ObjParamLimit*32-1] of byte;
-  ObjParamTypes: array[0..FileLimit*ObjParamLimit-1] of byte;
-  ObjParamValues: array[0..FileLimit*ObjParamLimit-1] of integer;
+  ObjParams: array[0..FilesLimit-1] of integer;
+  ObjParamNames: array[0..FilesLimit*ObjParamsLimit*32-1] of byte;
+  ObjParamTypes: array[0..FilesLimit*ObjParamsLimit-1] of byte;
+  ObjParamValues: array[0..FilesLimit*ObjParamsLimit-1] of integer;
 
   ObjTitle: PChar;
 
@@ -2532,9 +2532,9 @@ begin
     begin
       // set sub-object's parameters
       P2.Params := ObjParams[i];
-      Move(ObjParamNames[i*ObjParamLimit*32], P2.ParamNames, ObjParamLimit*32);
-      Move(ObjParamTypes[i*ObjParamLimit], P2.ParamTypes, ObjParamLimit);
-      Move(ObjParamValues[i*ObjParamLimit], P2.ParamValues, ObjParamLimit*4);
+      Move(ObjParamNames[i*ObjParamsLimit*32], P2.ParamNames, ObjParamsLimit*32);
+      Move(ObjParamTypes[i*ObjParamsLimit], P2.ParamTypes, ObjParamsLimit);
+      Move(ObjParamValues[i*ObjParamsLimit], P2.ParamValues, ObjParamsLimit*4);
       // compile sub-object
       if (Level = 1) and FileExists(TopDir + ObjFilenames[i] + '.spin2') then
         CompileRecursively(TopDir + ObjFilenames[i] + '.spin2', 1, cObjOff, cListOff, cDocOff)
@@ -2595,7 +2595,7 @@ begin
         try
           Reset(f, 1);
           s := FileSize(f);
-          if p + s > ObjLimit then CompilerError('DAT files exceed ' + IntToStr(ObjLimit div 1024) + 'k limit');
+          if p + s > ObjSizeLimit then CompilerError('DAT files exceed ' + IntToStr(ObjSizeLimit div 1024) + 'k limit');
           BlockRead(f, P2.DatData[p], s);
           P2.DatOffsets[i] := p;
           P2.DatLengths[i] := s;
@@ -2614,8 +2614,8 @@ begin
   P2Compile2;
   if P2.Error then CompilerError(P2.ErrorMsg); //aborts if error
   // save obj file into memory if a copy doesn't already exist
-  if ObjFileCount = ObjFileLimit then
-    CompilerError('Limit of ' + IntToStr(ObjFileLimit) + ' object files exceeded');
+  if ObjFileCount = ObjFilesLimit then
+    CompilerError('Limit of ' + IntToStr(ObjFilesLimit) + ' object files exceeded');
   match := false;
   if (ObjFileCount > 0) and (P2.ObjLength > 0) then
   begin
@@ -2756,9 +2756,9 @@ begin
   AssignFile(f, Filename);
   try
     Reset(f, 1);
-    Size := Smaller(FileSize(f), ObjLimit);
+    Size := Smaller(FileSize(f), ObjSizeLimit);
     BlockRead(f, P2.Obj, Size);
-    if Size < ObjLimit then for i := Size to ObjLimit-1 do P2.Obj[i] := 0;
+    if Size < ObjSizeLimit then for i := Size to ObjSizeLimit-1 do P2.Obj[i] := 0;
   finally
     CloseFile(f);
   end;
@@ -2771,7 +2771,7 @@ begin
   AssignFile(f, Filename);
   try
     Reset(f, 1);
-    P2.ObjLength := Smaller(FileSize(f), ObjLimit);
+    P2.ObjLength := Smaller(FileSize(f), ObjSizeLimit);
     BlockRead(f, P2.Obj, P2.ObjLength);
   finally
     CloseFile(f);
