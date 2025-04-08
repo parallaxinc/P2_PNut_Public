@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v51		*
+;*	       Spin2 Compiler v51a		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2025 by Parallax, Inc.	*
-;*	    Last Updated: 2025/02/17		*
+;*	    Last Updated: 2025/04/02		*
 ;*						*
 ;************************************************
 
@@ -1428,7 +1428,7 @@ opcode		oc_add,		op_add,		6,	bc_add,		0,	1,	0,	1,	1,	0,	0	; +
 opcode		oc_fadd,	op_fadd,	6,	bc_fadd,	0,	1,	0,	0,	1,	0,	1	; +.
 opcode		oc_sub,		op_sub,		6,	bc_sub,		0,	1,	0,	1,	1,	0,	0	; -
 opcode		oc_fsub,	op_fsub,	6,	bc_fsub,	0,	1,	0,	0,	1,	0,	1	; -.
-opcode		oc_pow,		op_pow,		6,	bc_pow,		0,	1,	0,	0,	1,	0,	1
+opcode		oc_pow,		op_pow,		6,	bc_pow,		0,	1,	0,	0,	1,	0,	1	; POW
 opcode		oc_fge,		op_fge,		7,	bc_fge,		0,	1,	0,	1,	1,	0,	0	; #>
 opcode		oc_fle,		op_fle,		7,	bc_fle,		0,	1,	0,	1,	1,	0,	0	; <#
 opcode		oc_addbits,	op_addbits,	8,	bc_addbits,	0,	1,	0,	1,	0,	0,	0	; ADDBITS
@@ -3175,7 +3175,7 @@ print_symbol2:	push	eax
 		cmp	al,0
 		je	@@symdone
 		cmp	al,' '
-		jb	@@symspcl
+		jbe	@@symspcl
 		call	print_chr
 		jmp	@@symchr
 @@symspcl:	mov	ah,al
@@ -11973,7 +11973,7 @@ compile_instruction:
 
 		mov	edx,[source_start]	;save source start for compile_var_multi and ct_method_ptr
 
-		cmp	al,type_under		;check for _{(type_con_int|type_con_struct)},... := param(s),...
+		cmp	al,type_under		;check for _{[type_con_int|type_con_struct]},... := param(s),...
 		jne	@@notwriteskip
 		call	back_element
 		call	check_write_skip
@@ -12373,21 +12373,21 @@ compile_orgh:	call	get_end			;get end
 		ret
 ;
 ;
-; Compile multi-variable assignment - var / _{(type_con_int|type_con_struct)},... := param(s),...
+; Compile multi-variable assignment - var / _{[type_con_int|type_con_struct]},... := param(s),...
 ;
 compile_var_multi:
 
 		mov	[source_ptr],edx	;repoint to initial variable
 
-		mov	ecx,0			;scan 'var / _{(type_con_int|type_con_struct)},...' and remember source_ptr's
+		mov	ecx,0			;scan 'var / _{[type_con_int|type_con_struct]},...' and remember source_ptr's
 		mov	edx,0			;ecx = long count, edx = variable count
 
 @@scan:		push	[source_ptr]		;save source pointer
 
-		call	check_write_skip	;if '_{(type_con_int|type_con_struct)}', got long count in eax
+		call	check_write_skip	;if '_{[type_con_int|type_con_struct]}', got long count in eax
 		je	@@next
 
-		push	ecx			;not '_{(type_con_int|type_con_struct)}', get variable
+		push	ecx			;not '_{[type_con_int|type_con_struct]}', get variable
 		call	get_variable
 		mov	al,ch
 		pop	ecx
@@ -12415,7 +12415,7 @@ compile_var_multi:
 @@write:	pop	[source_ptr]		;compile variable writes
 		push	ecx
 		push	edx
-		call	check_write_skip	;if '_{(type_con_int|type_con_struct)}', just pop value(s)
+		call	check_write_skip	;if '_{[type_con_int|type_con_struct]}', just pop value(s)
 		jne	@@var
 		cmp	eax,1			;single or multiple pop(s)?
 		je	@@singlepop
@@ -14408,31 +14408,33 @@ get_element_obj:
 		call	get_element		;get element
 		jc	@@eof			;eof?
 
-		cmp	al,type_obj		;type_obj?
+		cmp	al,type_obj		;if not type_obj, done
 		jne	@@done
-
-		mov	[@@value],ebx		;save value
 
 		push	[source_start]		;save source start
 		pop	[@@start]
 
+		mov	[@@value],ebx		;save value
+
 		call	get_element		;dot?
 		cmp	al,type_dot
-		jne	@@back1
+		jne	@@back1			;if no dot, back up once
 
 		mov	eax,[@@value]		;get type_obj_int/float/struct/pub symbol
 		call	get_obj_symbol
-		je	@@back2			;if type_obj_pub, back up twice
+		je	@@back2			;if type_obj_pub, back up twice (will be handled later)
 
-		push	[@@start]		;type_con_int/float/struct
-		pop	[source_start]		;restore source_start
-		or	[back_skip],11b		;if back_element gets called later, skip dot and type_obj_int/float/struct
-		jmp	@@done			;exit with type_con_int/float/struct
+		or	[back_skip],11b		;type_con_int/float/struct, if back_element gets called, must back up twice
+		jmp	@@restore		;exit with type_con_int/float/struct
 
-@@back2:	call	back_element		;type_obj_pub, back up so compiler can discover it later
-@@back1:	call	back_element		;not dot, back up
-		mov	eax,type_obj		;restore type and value
+@@back2:	call	back_element		;type_obj_pub, back up
+@@back1:	call	back_element		;no dot, back up
+
+		mov	eax,type_obj		;restore type_obj and value
 		mov	ebx,[@@value]
+
+@@restore:	push	[@@start]		;restore source start
+		pop	[source_start]
 
 @@done:		clc				;not eof, c=0
 @@eof:		ret
@@ -14486,10 +14488,6 @@ handle_escape_chr:
 
 		cmp	al,'R'
 		mov	bl,13
-		je	@@done
-
-		cmp	al,'"'
-		mov	bl,'"'
 		je	@@done
 
 		cmp	al,'\'
@@ -15675,36 +15673,51 @@ compile_parameter:
 
 		call	get_element_obj		;get element to check
 
-		call	is_struct			;structure?
-		jne	@@notstruct
-		call	check_var			;get structure{[]}{.substructure{[]}}{.member{[]}}
+
+		call	check_var			;check variable to detect structure
+		jne	@@notstruct			;if not variable, can't be structure
+
+		mov	al,ch				;got variable, if not structure, get initial element again
+		call	is_struct
+		jne	@@notstruct2
+
 		cmp	[compiled_struct_flags],3	;structure or byte/word/long member
 		jne	@@struct
+
 		call	check_left			;byte/word/long member, check for '(' indicating method pointer
 		jne	@@single			;if no, '(', single parameter
-		pop	eax				;get initial element again, without calling check_var
+
+		pop	eax				;'(', get initial element again and try as method pointer (must be long)
 		push	eax
 		mov	[source_ptr],eax
 		call	get_element
-		jmp	@@chkvarmethod			;try as method pointer, must be long
+		jmp	@@chkvarmethod
+
 @@struct:	cmp	[compiled_struct_size],4	;structure, if fits in a long, single parameter
 		jbe	@@single
-		call	get_element			;if "==" or "<>" follows, single parameter
+		call	get_element			;if "==" or "<>" follows, single parameter to be handled by compile_exp
 		cmp	al,type_op
 		jne	@@notstructcmp
 		cmp	bl,op_e
 		je	@@single
 		cmp	bl,op_ne
 		je	@@single
-@@notstructcmp:	call	back_element
+
+@@notstructcmp:	call	back_element			;not "==" or "<>", back up
 		mov	eax,[compiled_struct_size]	;structure > long, get long count to push
 		add	eax,11b
 		shr	eax,2
 		mov	dl,0				;compile structure read/push (checks struct size)
 		call	compile_var
-		pop	ebx				;pop source pointer
+		pop	ebx				;pop source pointer and exit
 		jmp	@@exit
+
+@@notstruct2:	pop	eax				;variable, but not structure, get initial element again
+		push	eax
+		mov	[source_ptr],eax
+		call	get_element_obj
 @@notstruct:
+
 		cmp	al,type_i_flex		;flex instruction?
 		jne	@@notflex
 		movzx	ecx,bh			;multiple return values?
