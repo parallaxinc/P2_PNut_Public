@@ -10254,7 +10254,7 @@ cordic_q:	push	ebx
 		mov	edx,[@@x+4]
 		add	eax,[@@y+0]
 		adc	edx,[@@y+4]
-		add	eax,20h
+		add	eax,40h
 		adc	edx,0
 		mov	cl,7
 @@done:		call	@@sar
