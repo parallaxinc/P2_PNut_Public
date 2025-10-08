@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v51a		*
+;*	       Spin2 Compiler v52		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2025 by Parallax, Inc.	*
-;*	    Last Updated: 2025/04/02		*
+;*	    Last Updated: 2025/10/05		*
 ;*						*
 ;************************************************
 
@@ -32,7 +32,7 @@
 ;
 ; Equates
 ;
-spin2_version		=	51
+spin2_version		=	52
 
 obj_size_limit		=	100000h		;must be same in delphi
 obj_data_limit		=	200000h		;must be same in delphi
@@ -1168,6 +1168,10 @@ count2		bc_taskcont
 count2		bc_taskchk
 count2		bc_taskid
 count2		bc_task_return
+
+count2		bc_movbyts			;hub bytecodes, miscellaneous routines
+count2		bc_endianl
+count2		bc_endianw
 ;
 ;
 ; Flex codes
@@ -1258,6 +1262,10 @@ flexcode	fc_qcos,	bc_qcos,	3,	1,	0,	1
 flexcode	fc_rotxy,	bc_rotxy,	3,	2,	0,	1
 flexcode	fc_polxy,	bc_polxy,	2,	2,	0,	1
 flexcode	fc_xypol,	bc_xypol,	2,	2,	0,	1
+
+flexcode	fc_movbyts,	bc_movbyts,	2,	1,	0,	1	;(also asm instruction)
+flexcode	fc_endianl,	bc_endianl	1,	1,	0,	1
+flexcode	fc_endianw,	bc_endianw	1,	1,	0,	1
 
 flexcode	fc_float,	bc_float,	1,	1,	0,	1
 flexcode	fc_round,	bc_round,	1,	1,	0,	1
@@ -2229,7 +2237,7 @@ error_edotdot:	call	set_error
 		db	'Expected ".."',0
 
 error_eelcoeol:call	set_error
-		db	'Expected "=" "[" "," "(" or end of line',0
+		db	'Expected "=", "[" ",", or end of line',0
 
 error_eend:	call	set_error
 		db	'Expected END',0
@@ -2486,6 +2494,12 @@ error_nmt4c:	call	set_error
 error_npmf:	call	set_error
 		db	'No PUB method or DAT block found',0
 
+error_nqinsn:	call	set_error
+		db	'NEXT/QUIT is not sufficiently nested within REPEAT block(s)',0
+
+error_nqlcmb:	call	set_error
+		db	'NEXT/QUIT level-count must be from 1 to 16',0
+
 error_oaet:	call	set_error
 		db	'Origin already exceeds target',0
 
@@ -2632,9 +2646,6 @@ error_teinafti:	call	set_error
 
 error_ticobu:	call	set_error
 		db	'This instruction can only be used as an expression term, since it returns results',0
-
-error_tioawarb:	call	set_error
-		db	'This instruction is only allowed within a REPEAT block',0
 
 error_tmop:	call	set_error
 		db	'Too many object parameters',0
@@ -3123,7 +3134,7 @@ print_obj:	call	print_string		;print spin2 level
 		call	print_chr
 
 @@ascii:	mov	al,[esi+ebx]
-		cmp	al,' '
+		cmp	al,20h	;TESTT change to 30h
 		jb	@@notascii
 		cmp	al,7Fh
 		jb	@@isascii
@@ -5934,6 +5945,9 @@ compile_dat:	mov	eax,[obj_ptr]		;save obj_ptr
 		jmp	@@checkdone
 
 @@checkflex:	push	eax
+		mov	eax,ac_movbyts		;MOVBYTS ?
+		cmp	ebx,fc_movbyts
+		je	@@checkok
 		mov	eax,ac_hubset		;HUBSET ?
 		cmp	ebx,fc_hubset
 		je	@@checkok
@@ -7235,7 +7249,7 @@ insert_interpreter:
 @@var_longs	=	3Ch
 @@clkmode_hub	=	40h
 @@clkfreq_hub	=	44h
-@@debugnop	=	0F2Ch
+@@debugnop	=	0F34h
 
 interpreter:	include	"Spin2_interpreter.inc"
 interpreter_end:
@@ -10254,7 +10268,7 @@ cordic_q:	push	ebx
 		mov	edx,[@@x+4]
 		add	eax,[@@y+0]
 		adc	edx,[@@y+4]
-		add	eax,20h
+		add	eax,40h
 		adc	edx,0
 		mov	cl,7
 @@done:		call	@@sar
@@ -12112,11 +12126,26 @@ compile_struct_fill:
 ; Compile instruction - 'next'/'quit'
 ; on entry: bl=0 for 'next', bl=1 for 'quit'
 ;
-ci_next_quit:	mov	ecx,[bnest_ptr]		;get blocknest ptr
+ci_next_quit:	mov	bh,1			;if end of line, default to 1 level
+		call	check_end
+		je	@@onelevel
+
+		mov	al,bl			;not end of line, get level count
+		call	get_value_int
+		cmp	ebx,1
+		jl	@@levelerror
+		cmp	ebx,block_nest_limit
+		jle	@@levelok
+@@levelerror:	jmp	error_nqlcmb
+@@levelok:	mov	bh,bl
+		mov	bl,al
+@@onelevel:
+
+		mov	ecx,[bnest_ptr]		;get blocknest ptr
 		mov	edx,0			;reset pop count
 
 @@find:		cmp	ecx,0			;find repeat block
-		je	error_tioawarb
+		je	error_nqinsn
 
 		mov	al,[bnest_type-1+ecx]	;get blocknest type
 		mov	ah,bc_jmp		;get default branch for 'quit'
@@ -12156,8 +12185,11 @@ ci_next_quit:	mov	ecx,[bnest_ptr]		;get blocknest ptr
 @@ignore:	dec	ecx			;check next lower blocknest until repeat block found
 		jmp	@@find
 
+@@got:		dec	bh			;got repeat block, ignore until level reached
+		jnz	@@ignore
 
-@@got:		cmp	edx,0			;compile any pops
+
+		cmp	edx,0			;compile any pops
 		je	@@nopops
 		cmp	edx,1*4			;single pop?
 		jne	@@multipops
@@ -16215,7 +16247,7 @@ check_var:	push	eax
 		jbe	@@lvdh
 @@nothub:
 
-		cmp	al,type_reg		;reg[address]?
+		cmp	al,type_reg		;REG[address]?
 		jne	@@notreg
 		call	get_leftb
 		mov	bl,10b
@@ -19549,6 +19581,11 @@ enter_symbols_level:
 		lea	esi,[level51_symbols]
 		call	enter_symbols
 @@not51:
+		cmp	[spin2_level],52
+		jb	@@not52
+		lea	esi,[level52_symbols]
+		call	enter_symbols
+@@not52:
 		ret
 ;
 ;
@@ -20270,6 +20307,7 @@ automatic_symbols:
 	sym	type_under,		0,		'_'
 
 
+	sym	type_i_flex,		fc_movbyts	'MOVBYTS'	;(also asm instruction)
 	sym	type_i_flex,		fc_hubset,	'HUBSET'	;(also asm instruction)
 
 	sym	type_i_flex,		fc_coginit,	'COGINIT'	;(also asm instruction)
@@ -20543,7 +20581,7 @@ automatic_symbols:
 	sym	type_asm_inst,		ac_muxnits,	'MUXNITS'
 	sym	type_asm_inst,		ac_muxnibs,	'MUXNIBS'
 	sym	type_asm_inst,		ac_muxq,	'MUXQ'
-	sym	type_asm_inst,		ac_movbyts,	'MOVBYTS'
+;	sym	type_asm_inst,		ac_movbyts,	'MOVBYTS'	(declared as type_i_flex)
 
 	sym	type_asm_inst,		ac_mul,		'MUL'
 	sym	type_asm_inst,		ac_muls,	'MULS'
@@ -21275,6 +21313,15 @@ level51_symbols:
 	sym	type_op,		oc_exp2,	'EXP2'
 	sym	type_op,		oc_exp10,	'EXP10'
 	sym	type_op,		oc_exp,		'EXP'
+
+	db	0
+
+
+level52_symbols:
+
+	sym	type_i_flex,		fc_endianl,	'ENDIANL'
+	sym	type_i_flex,		fc_endianw,	'ENDIANW'
+	sym	type_con_int,		27,		'DEBUG_END_SESSION'
 
 	db	0
 ;

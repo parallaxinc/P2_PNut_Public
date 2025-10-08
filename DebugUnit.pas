@@ -178,8 +178,8 @@ procedure TDebugForm.ChrIn(x: byte);
 var
   i, j: integer;
 begin
-  // start of debugger message?
-  if (x < 8) then
+  // start of debugger message or end of session?
+  if x < 8 then
   begin
     ReturnRByte;
     if DebuggerEna shr x and 1 = 0 then
@@ -190,6 +190,13 @@ begin
     end;
     LastDebugTick := GetTickCount;
     DebuggerForm[x].Breakpoint;
+    Exit;
+  end;
+  // end if debug session?
+  if x = 27 then
+  begin
+    DebugActive := False;
+    Close;
     Exit;
   end;
   // start of display string?

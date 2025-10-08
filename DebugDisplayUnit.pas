@@ -2229,6 +2229,14 @@ begin
   begin
     if NextKey then
     case val of
+      key_black..key_gray:      // set text color and maybe text background color
+      begin
+        Dec(ptr);
+        KeyColor(vTextColor);
+        KeyColor(vTextBackColor);
+      end;
+      key_backcolor:            // set text background color
+        KeyColor(vTextBackColor);
       key_clear:                // clear screen and home
       begin
         ClearBitmap;
