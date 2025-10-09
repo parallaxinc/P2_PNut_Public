@@ -2498,7 +2498,7 @@ error_nqinsn:	call	set_error
 		db	'NEXT/QUIT is not sufficiently nested within REPEAT block(s)',0
 
 error_nqlcmb:	call	set_error
-		db	'NEXT/QUIT level-count must be from 1 to 16',0
+		db	'NEXT/QUIT level must be from 1 to 16',0
 
 error_oaet:	call	set_error
 		db	'Origin already exceeds target',0
@@ -12123,14 +12123,16 @@ compile_struct_fill:
 		jmp	enter_hub_bytecode
 ;
 ;
-; Compile instruction - 'next'/'quit'
-; on entry: bl=0 for 'next', bl=1 for 'quit'
+; Compile instruction - NEXT/QUIT {level}
+; on entry: bl=0 for NEXT, bl=1 for QUIT
 ;
-ci_next_quit:	mov	bh,1			;if end of line, default to 1 level
-		call	check_end
+ci_next_quit:	call	check_end		;if not end of line, get level count
+		jne	@@getlevel
+		call	back_element		;end of line, back up
+		mov	bh,1			;do one level
 		je	@@onelevel
 
-		mov	al,bl			;not end of line, get level count
+@@getlevel:	mov	al,bl			;get level count
 		call	get_value_int
 		cmp	ebx,1
 		jl	@@levelerror
@@ -12218,7 +12220,7 @@ ci_next_quit:	mov	bh,1			;if end of line, default to 1 level
 		jmp	compile_branch
 ;
 ;
-; Compile instruction - 'return'
+; Compile instruction - RETURN
 ;
 ci_return:	call	get_element		;preview next element
 		call	back_element
@@ -12239,7 +12241,7 @@ ci_return:	call	get_element		;preview next element
 @@error:	jmp	error_eeol		;error, something after 'return', but method has no result(s)
 ;
 ;
-; Compile instruction - 'abort'
+; Compile instruction - ABORT
 ;
 ci_abort:	call	get_element		;preview next element
 		call	back_element
