@@ -2498,7 +2498,7 @@ error_nqinsn:	call	set_error
 		db	'NEXT/QUIT is not sufficiently nested within REPEAT block(s)',0
 
 error_nqlcmb:	call	set_error
-		db	'NEXT/QUIT level must be from 1 to 16',0
+		db	'NEXT/QUIT level must be from 1 to 15',0
 
 error_oaet:	call	set_error
 		db	'Origin already exceeds target',0
@@ -12129,44 +12129,52 @@ compile_struct_fill:
 ci_next_quit:	call	check_end		;if not end of line, get level count
 		jne	@@getlevel
 		call	back_element		;end of line, back up
-		mov	bh,1			;do one level
-		je	@@onelevel
+		mov	bh,0			;do this level (0)
+		je	@@gotlevel
 
-@@getlevel:	mov	al,bl			;get level count
+@@getlevel:	mov	al,bl			;get level count (1..n)
 		call	get_value_int
 		cmp	ebx,1
 		jl	@@levelerror
-		cmp	ebx,block_nest_limit
+		cmp	ebx,block_nest_limit-1
 		jle	@@levelok
 @@levelerror:	jmp	error_nqlcmb
 @@levelok:	mov	bh,bl
 		mov	bl,al
-@@onelevel:
+@@gotlevel:
 
 		mov	ecx,[bnest_ptr]		;get blocknest ptr
 		mov	edx,0			;reset pop count
 
-@@find:		cmp	ecx,0			;find repeat block
+@@find:		cmp	ecx,0			;make sure sufficiently nested before finding repeat block
 		je	error_nqinsn
 
 		mov	al,[bnest_type-1+ecx]	;get blocknest type
-		mov	ah,bc_jmp		;get default branch for 'quit'
+		mov	ah,bc_jmp		;get default branch type for 'next' and 'quit'
 
 		cmp	al,type_repeat		;'repeat' blocknest?
 		je	@@got
 
-		cmp	al,type_repeat_var	;'repeat-var' blocknest?
+		cmp	al,type_repeat_var	;'repeat-var' or 'repeat-count-var' blocknest?
 		je	@@repvar
-		cmp	al,type_repeat_count_var;'repeat-count-var' blocknest?
+		cmp	al,type_repeat_count_var
 		jne	@@notrepvar
-@@repvar:	cmp	bl,0			;'next' needs no pops
+@@repvar:	cmp	bl,1			;'next' or 'quit'?
+		je	@@repvar_quit
+		cmp	bh,0			;target-level 'next' needs no pops
 		je	@@got
-		add	edx,4*4			;'quit' needs 4 long pops
+@@repvar_quit:	add	edx,4*4			;'quit' or non-target-level 'next', 4 long pops needed
 		jmp	@@got
 @@notrepvar:
 		cmp	al,type_repeat_count	;'repeat-count' blocknest?
 		jne	@@notrepcount
-		mov	ah,bc_jnz		;'quit' uses bc_jnz since non-0 value is on stack (no need to pop)
+		cmp	bh,0			;if not at target level, add 1 long pop
+		je	@@repcount
+		add	edx,1*4
+		jmp	@@got
+@@repcount:	cmp	bl,0			;target-level 'next' needs no pops
+		je	@@got
+		mov	ah,bc_jnz		;target-level 'quit' needs 1 pop, uses bc_jnz to pop non-0 long
 		jmp	@@got
 @@notrepcount:
 		cmp	al,type_case		;allow nesting within 'case' block(s)
@@ -12188,7 +12196,7 @@ ci_next_quit:	call	check_end		;if not end of line, get level count
 		jmp	@@find
 
 @@got:		dec	bh			;got repeat block, ignore until level reached
-		jnz	@@ignore
+		jns	@@ignore
 
 
 		cmp	edx,0			;compile any pops
@@ -12206,18 +12214,14 @@ ci_next_quit:	call	check_end		;if not end of line, get level count
 		call	compile_rfvar
 		pop	eax
 @@nopops:
+
 		mov	ecx,[bstack_base-4+ecx*4]
-
-		cmp	bl,1			;compile 'next'/'quit' branch
-		je	@@quit
-
-		mov	al,bc_jmp		;'next' (jmp)
-		mov	ebx,[bstack+0+ecx*4]
-		jmp	compile_branch
-
-@@quit:		mov	al,ah			;'quit' (jmp/jnz)
-		mov	ebx,[bstack+4+ecx*4]
-		jmp	compile_branch
+		cmp	bl,0			;'next' (bc_jmp)?
+		je	@@isnext
+		inc	ecx			;'quit' (bc_jmp/bc_jnz)
+@@isnext:	mov	al,ah			;bc_jmp/bc_jnz
+		mov	ebx,[bstack+ecx*4]	;get 'next' or 'quit' address
+		jmp	compile_branch		;compile branch
 ;
 ;
 ; Compile instruction - RETURN
