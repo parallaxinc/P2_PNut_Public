@@ -9481,9 +9481,9 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		cmp	al,type_offsetof	;OFFSETOF(struct)?
 		jne	@@notoffsetof
 		cmp	[con_block_flag],1	;not allowed in CON block
-		je	error_soioa
+		je	error_ooioa
 		cmp	[obj_block_flag],1	;not allowed in OBJ block
-		je	error_soioa
+		je	error_ooioa
 		call	@@checkint
 		call	get_left			;get '('
 		call	get_offset_of_struct_member	;get offset of struct member
