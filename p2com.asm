@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v52		*
+;*	       Spin2 Compiler v53		*
 ;*						*
 ;*	     Written by Chip Gracey		*
-;*	 (C) 2006-2025 by Parallax, Inc.	*
-;*	    Last Updated: 2025/10/05		*
+;*	 (C) 2006-2026 by Parallax, Inc.	*
+;*	    Last Updated: 2026/03/01		*
 ;*						*
 ;************************************************
 
@@ -32,7 +32,7 @@
 ;
 ; Equates
 ;
-spin2_version		=	52
+spin2_version		=	53
 
 obj_size_limit		=	100000h		;must be same in delphi
 obj_data_limit		=	200000h		;must be same in delphi
@@ -682,6 +682,7 @@ count		type_block		;	CON, VAR, DAT, OBJ, PUB, PRI
 count		type_field		;	FIELD
 count		type_struct		;	STRUCT
 count		type_sizeof		;	SIZEOF
+count		type_offsetof		;	OFFSETOF
 count		type_size		;	BYTE, WORD, LONG
 count		type_size_fit		;	BYTEFIT, WORDFIT
 count		type_fvar		;	FVAR, FVARS
@@ -2520,6 +2521,9 @@ error_oinaiom:	call	set_error
 
 error_omblc:	call	set_error
 		db	'OTHER must be last case',0
+
+error_ooioa:	call	set_error
+		db	'OFFSETOF() is only allowed in DAT, VAR, PUB, and PRI blocks',0
 
 error_os:	call	set_error
 		db	'Open string',0
@@ -9474,6 +9478,18 @@ check_constant:	cmp	dh,4			;trying to resolve Spin2 constant?
 		mov	ebx,eax
 		jmp	@@okay
 @@notsizeof:
+		cmp	al,type_offsetof	;OFFSETOF(struct)?
+		jne	@@notoffsetof
+		cmp	[con_block_flag],1	;not allowed in CON block
+		je	error_soioa
+		cmp	[obj_block_flag],1	;not allowed in OBJ block
+		je	error_soioa
+		call	@@checkint
+		call	get_left			;get '('
+		call	get_offset_of_struct_member	;get offset of struct member
+		call	get_right			;get ')'
+		jmp	@@okay
+@@notoffsetof:
 		test	[exp_flags],10b		;if operand mode, check for local symbol
 		jz	@@notop
 		call	check_local
@@ -11251,7 +11267,7 @@ cb_case:	mov	ebp,[column]		;set new column
 		mov	[source_ptr],edx	;set source ptr to 'other' block
 		call	get_element		;get 'other' to set column
 		call	get_column		;get column
-		call	get_element		;skip colon
+		call	get_colon		;skip colon
 		push	ebp			;save original column
 		mov	ebp,[column]		;get 'other' column
 		call	compile_block		;compile 'other' case block
@@ -11280,14 +11296,14 @@ cb_case:	mov	ebp,[column]		;set new column
 		cmp	al,type_other		;if 'other' case, skip (already compiled)
 		jne	@@notother2
 		call	get_element		;skip 'other'
-		call	get_element		;skip colon
+		call	get_colon		;skip colon
 		call	skip_block		;skip 'other' block
 		jmp	@@skipped
 @@notother2:
 @@skiprange:	call	skip_range		;skip range/value (already compiled)
 		call	check_comma
 		je	@@skiprange
-		call	get_element		;skip colon
+		call	get_colon		;skip colon
 
 		inc	ecx			;write block address
 		mov	eax,ecx
@@ -12129,8 +12145,8 @@ compile_struct_fill:
 ci_next_quit:	call	check_end		;if not end of line, get level count
 		jne	@@getlevel
 		call	back_element		;end of line, back up
-		mov	bh,0			;do this level (0)
-		je	@@gotlevel
+		mov	bh,0			;do current level (0)
+		jmp	@@gotlevel
 
 @@getlevel:	mov	al,bl			;get level count (1..n)
 		call	get_value_int
@@ -13584,6 +13600,9 @@ compile_term:	cmp	al,type_con_int		;constant integer?
 		cmp	al,type_sizeof		;SIZEOF ?
 		je	ct_sizeof
 
+		cmp	al,type_offsetof	;OFFSETOF ?
+		je	ct_offsetof
+
 		cmp	al,type_constr		;STRING ?
 		je	ct_constr
 
@@ -13786,6 +13805,17 @@ ct_sizeof:	call	get_left			;get '('
 
 		mov	ebx,eax				;compile size constant
 		call	compile_constant
+
+		jmp	get_right			;get ')'
+;
+;
+; Compile term - OFFSETOF(type_con_struct.member)
+;
+ct_offsetof:	call	get_left			;get '('
+
+		call	get_offset_of_struct_member	;get offset of struct member
+
+		call	compile_constant		;compile size constant
 
 		jmp	get_right			;get ')'
 ;
@@ -17228,6 +17258,136 @@ ddx		compiled_struct_obj_ptr
 dbx		compiled_struct_index_mode
 ;
 ;
+; Get offset of structure member - compile time only
+;
+; on entry, after OFFSETOF(:
+;
+;	type_con_struct{[constant_index]}{{.byte/word/long/struct{[constant_index]} ...}
+;
+; on exit:
+;
+;	ebx = offset
+;
+get_offset_of_struct_member:
+
+		push	eax
+		push	ecx
+		push	edx
+		push	esi
+		push	edi
+
+		call	get_element			;get type_con_struct (ebx = struct id)
+		cmp	al,type_con_struct
+		jne	error_eaesn
+
+		lea	esi,[struct_def]		;point to start of structure record
+		add	esi,[struct_id_to_def+ebx*4]
+
+		mov	[@@offset],0			;init offset to zero
+
+
+@@structloop:	lodsw					;skip structure record size
+
+		lodsd					;get structure size
+		mov	[@@size],eax
+
+		call	@@handleindex			;handle structure index
+
+		call	check_dot			;check for '.'
+		jne	@@done				;if no '.' then done
+
+		call	get_symbol			;get symbol, ecx holds length
+		jc	error_easmn
+		mov	[@@symbol_length],ecx
+
+
+@@checkmember:	lodsd					;(next) structure member, get offset
+		mov	[@@member_offset],eax
+		lodsb					;get type
+		mov	[@@member_type],al
+		cmp	al,3				;struct type?
+		jne	@@notstruct
+		mov	edx,esi				;remember sub-struct record offset
+		movzx	eax,[word esi]			;skip sub-struct record for now
+		add	esi,eax
+@@notstruct:
+		lodsb					;get member name length
+
+		movzx	ecx,al				;copy member name to symbol2
+		lea	edi,[symbol2]
+	rep	movsb
+
+		movzx	ecx,al				;compare member name length
+		cmp	ecx,[@@symbol_length]
+		jne	@@notmatch
+
+		push	esi				;compare member name
+		lea	esi,[symbol]
+		lea	edi,[symbol2]
+	repe	cmpsb
+		pop	esi
+		jne	@@notmatch
+
+		mov	eax,[@@member_offset]		;got match, update offset
+		add	[@@offset],eax
+
+		mov	cl,[@@member_type]		;sub-struct? (3)
+		cmp	cl,3
+		jne	@@notstruct2			;if not struct, byte/word/long
+		mov	esi,edx				;struct, repoint to sub-struct
+		jmp	@@structloop
+@@notstruct2:
+		mov	eax,1				;byte/word/long, set size to 1/2/4
+		shl	eax,cl
+		mov	[@@size],eax
+		call	@@handleindex			;handle byte/word/long index
+		jmp	@@done				;done
+
+@@notmatch:	lodsb					;not found, another member to check?
+		cmp	al,0
+		jne	@@checkmember
+		jmp	error_sdnctn
+
+
+@@done:		mov	ebx,[@@offset]			;return offset
+
+		pop	edi
+		pop	esi
+		pop	edx
+		pop	ecx
+		pop	eax
+		ret
+
+
+
+@@handleindex:	call	check_leftb			;check for [constant_index]
+		je	@@isindex
+		ret
+
+@@isindex:	call	get_value_int			;get constant index
+		cmp	[@@size],0FFFFh			;error if structure exceeds $FFFF bytes
+		ja	error_iscexb
+		mov	eax,ebx				;check range
+		cmp	eax,0FFFFh
+		ja	error_simbf
+		mul	[@@size]			;multiply by size and add to offset
+		cmp	eax,obj_size_limit
+		ja	@@error_sehr
+		add	[@@offset],eax
+		cmp	[@@offset],obj_size_limit
+		ja	@@error_sehr
+		jmp	get_rightb
+
+@@error_sehr:	jmp	error_sehr			;error, structure exceeds hub range
+
+
+ddx		@@offset
+ddx		@@size
+ddx		@@symbol_length
+ddx		@@member_offset
+dbx		@@member_type
+;
+;
 ; Compile constant
 ; ebx must hold constant
 ;
@@ -19592,6 +19752,11 @@ enter_symbols_level:
 		lea	esi,[level52_symbols]
 		call	enter_symbols
 @@not52:
+		cmp	[spin2_level],53
+		jb	@@not53
+		lea	esi,[level53_symbols]
+		call	enter_symbols
+@@not53:
 		ret
 ;
 ;
@@ -21328,6 +21493,13 @@ level52_symbols:
 	sym	type_i_flex,		fc_endianl,	'ENDIANL'
 	sym	type_i_flex,		fc_endianw,	'ENDIANW'
 	sym	type_con_int,		27,		'DEBUG_END_SESSION'
+
+	db	0
+
+
+level53_symbols:
+
+	sym	type_offsetof,		0,		'OFFSETOF'	;returns offset of structure member
 
 	db	0
 ;
