@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v53		*
+;*	       Spin2 Compiler v54		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2026 by Parallax, Inc.	*
-;*	    Last Updated: 2026/03/01		*
+;*	    Last Updated: 2026/04/22		*
 ;*						*
 ;************************************************
 
@@ -32,7 +32,7 @@
 ;
 ; Equates
 ;
-spin2_version		=	53
+spin2_version		=	54
 
 obj_size_limit		=	100000h		;must be same in delphi
 obj_data_limit		=	200000h		;must be same in delphi
@@ -1997,8 +1997,14 @@ error_bmbpbb:	call	set_error
 error_bdmbifc:	call	set_error
 		db	'Block designator must be in first column',0
 
+error_bfaoa:	call	set_error
+		db	'Bitfields are only allowed for BYTE/WORD/LONG members',0
+
 error_bmbft:	call	set_error
 		db	'BYTEFIT values must range from -$80 to $FF',0
+
+error_bnebwlb:	call	set_error
+		db	'Bit number exceeds BYTE/WORD/LONG boundary',0
 
 error_bnso:	call	set_error
 		db	'Blocknest stack overflow',0
@@ -2419,6 +2425,9 @@ error_isie:	call	set_error
 
 error_isil:	call	set_error
 		db	'ORGH inline block exceeds $FFFF longs (including the added RET instruction)',0
+
+error_lbnceubn:	call	set_error
+		db	'Lower bit number cannot exceed upper bit number',0
 
 error_level44:	call	set_error
 		db	'{Spin2_v44} is no longer supported due to changes in data structures beginning in v45',0
@@ -6775,7 +6784,7 @@ distill_obj_blocks:
 ;
 ; struct_name = existing_struct_name
 ;
-; struct_name({byte/word/long/struct} member_name{[count]}, ...)
+; struct_name({byte/word/long/struct} member_name{[count]}{.bitfield_name[bitfield]...}, ...)
 ;
 ;	struct element
 ;	--------------
@@ -6789,9 +6798,16 @@ distill_obj_blocks:
 ;	member record(s)
 ;	    long: member offset address
 ;	    byte: type (0=byte, 1=word, 2=long, 3=struct + struct_record)
-;	    byte: member_name length
+;	    byte: member_name length (0 allowed for first and only member being a nameless and single byte/word/long)
 ;	    byte(s): "member_name"
-;	    byte: 1 if another member, 0 if end of record
+;	    byte: 0 = end of record
+;	          1 = another member
+;	          2 = bitfield after byte/word/long (not allowed after struct)
+;	                  byte: bitfield_name length
+;	                  byte(s): "bitfield_name"
+;	                  word: bitfield (basebit + extrabits << 5)
+;	                  <loop to get next 0/1/2 byte>
+;
 ;
 build_struct_record:
 
@@ -6814,6 +6830,8 @@ build_struct_record:
 		call	@@enter_long			;reserve space for size_of_struct_memory patch
 
 		mov	[@@offset],0			;reset offset address
+		mov	[@@notfirst],0			;clear notfirst flag
+		mov	[@@singlebwl],0			;clear nameless byte/word/long flag
 
 @@member:	mov	ebx,[@@offset]			;(another) member, enter offset
 		call	@@enter_long
@@ -6822,7 +6840,7 @@ build_struct_record:
 
 		cmp	al,type_size			;byte/word/long?
 		jne	@@notsize
-		call	@@enter_byte			;enter 0/1/2 for byte/word/long
+		call	@@enter_type			;type is 0/1/2 for byte/word/long
 		mov	cl,bl				;size is 1/2/4
 		mov	ebx,1
 		shl	ebx,cl
@@ -6832,23 +6850,23 @@ build_struct_record:
 		cmp	al,type_con_struct		;struct name?
 		jne	@@notstruct
 		push	ebx				;save id of struct record
-		mov	bl,3				;enter 3 for struct
-		call	@@enter_byte
+		mov	bl,3				;type is 3 for struct
+		call	@@enter_type
 		pop	ebx
 		call	@@enter_struct			;copy other struct into this struct
 		jmp	@@getname
 @@notstruct:
-		mov	bl,2				;no byte/word/long/struct, default to long
-		call	@@enter_byte			;enter 2 for long
+		mov	bl,2				;no byte/word/long/struct, default to long, type is 2
+		call	@@enter_type			;enter type
 		mov	[@@size],4			;size is 4
 		call	back_element			;back up to get name again
 
-@@getname:	call	get_symbol			;get member name
-		jc	error_eas
-		lea	esi,[symbol]			;enter member name
-		call	@@enter_name
+@@getname:	call	@@enter_name			;get and enter member name (or single nameless byte/word/long)
+		mov	[@@notfirst],1			;set notfirst flag
 
-		mov	ebx,1				;if no [count] specified, use 1
+		mov	ebx,1				;default to single instance
+		cmp	[@@singlebwl],1			;if single nameless byte/word/long, skip instance-count check
+		je	@@gotcount
 		call	check_leftb			;'['?
 		jne	@@gotcount
 		call	get_value_int			;get count
@@ -6871,6 +6889,41 @@ build_struct_record:
 		cmp	[@@offset],obj_size_limit
 		jae	@@error_sehr
 
+		call	check_dot			;check for '.' bitfield
+		jne	@@nobitfield
+		cmp	[@@type],2			;only allowed for byte/word/long
+		ja	error_bfaoa
+@@bitfieldlp:	mov	bl,2				;enter 2 to signify (another) bitfield
+		call	@@enter_byte
+		call	@@enter_name			;get and enter bitfield name
+		call	get_leftb			;get '['
+		call	get_value_int			;get single/upper bit number
+		mov	eax,8				;must not exceed byte/word/long boundary
+		mov	cl,[@@type]
+		shl	eax,cl
+		cmp	ebx,eax
+		jae	error_bnebwlb
+		mov	ecx,ebx
+		call	check_dotdot			;'..' range?
+		jne	@@bitfieldnr
+		call	get_value_int			;get lower bit number
+		cmp	ebx,ecx				;must not exceed upper bit number
+		ja	error_lbnceubn
+@@bitfieldnr:	sub	ecx,ebx				;compute and enter bitfield word
+		shl	ecx,5
+		or	ebx,ecx
+		call	@@enter_word
+		call	get_rightb			;get ']'
+		call	check_dot			;another bitfield?
+		je	@@bitfieldlp
+@@nobitfield:
+		cmp	[@@singlebwl],1			;if single nameless byte/word/long, no more members allowed
+		jne	@@notsinglebwl
+		call	get_right			;get ')'
+		mov	bl,0				;enter 0 for done
+		call	@@enter_byte
+		jmp	@@patch				;make patches
+@@notsinglebwl:
 		call	get_comma_or_right		;get comma or ')'
 		mov	bl,1
 		je	@@more
@@ -6879,7 +6932,7 @@ build_struct_record:
 		cmp	bl,1
 		je	@@member
 
-		mov	eax,[@@start]			;make patches
+@@patch:	mov	eax,[@@start]			;make patches
 		mov	ebx,[struct_def_ptr]		;patch size_of_struct_record
 		sub	ebx,eax
 		mov	[word struct_def+eax],bx
@@ -6902,27 +6955,40 @@ build_struct_record:
 		loop	@@entersb
 		ret
 
-@@enter_name:	mov	bl,cl				;enter name length
+@@enter_name:	call	get_symbol			;get member name
+		jnc	@@enter_nameok			;if name found, continue
+		cmp	[@@notfirst],1			;no name, if not first name, error
+		je	error_eas
+		cmp	[@@type],3			;if structure, error (only nameless byte/word/long allowed)
+		je	error_eas
+		call	back_element			;back up
+		mov	[@@singlebwl],1			;first (and only) member is a byte/word/long that has no name
+		mov	bl,0				;enter 0 for name length (this also signals single nameless byte/word/long)
+		jmp	@@enter_byte
+
+@@enter_nameok:	mov	bl,cl				;enter name length
 		call	@@enter_byte
-@@enter_name2:	lodsb					;enter name characters
+		lea	esi,[symbol]
+@@enter_namelp:	lodsb					;enter name characters
 		mov	bl,al
 		call	@@enter_byte
-		loop	@@enter_name2
+		loop	@@enter_namelp
 		ret
 
-@@enter_long:	call	@@enter_word
+@@enter_long:	call	@@enter_word			;enter long
 		ror	ebx,16
 		call	@@enter_word
 		ror	ebx,16
 		ret
 
-@@enter_word:	call	@@enter_byte
+@@enter_word:	call	@@enter_byte			;enter word
 		xchg	bl,bh
 		call	@@enter_byte
 		xchg	bl,bh
 		ret
 
-@@enter_byte:	push	eax
+@@enter_type:	mov	[@@type],bl			;set type
+@@enter_byte:	push	eax				;enter byte
 		mov	eax,[struct_def_ptr]
 		cmp	eax,struct_def_limit
 		je	error_dsdle
@@ -6934,7 +7000,10 @@ build_struct_record:
 
 ddx		@@start
 ddx		@@offset
+dbx		@@type
 ddx		@@size
+dbx		@@notfirst
+dbx		@@singlebwl
 ;
 ;
 ; Collapse DEBUG data
@@ -16058,6 +16127,7 @@ get_variable:	call	get_element_obj
 ;
 ;	ecx:31:24  = variable pointer pre/post-inc/dec-push bytecode or 0 for read
 ;
+;	ecx.20     = bitfield struct flag
 ;	ecx.19     = bitfield constant flag
 ;	ecx.18     = bitfield flag
 ;	ecx.17     = index flag
@@ -16158,6 +16228,7 @@ get_variable:	call	get_element_obj
 ;	       [structptr]
 ;
 ;
+var_bitfield_struct	=	100000h
 var_bitfield_con	=	080000h
 var_bitfield_flag	=	040000h
 var_index_flag		=	020000h
@@ -16167,123 +16238,128 @@ var_size_override	=	010000h
 check_var:	push	eax
 		push	ebx
 
-		cmp	al,type_recv		;RECV?
+		cmp	al,type_recv			;RECV?
 		jne	@@notrecv
 		mov	al,type_register
 		mov	ebx,mrecv_reg
 @@notrecv:
-		cmp	al,type_send		;SEND?
+		cmp	al,type_send			;SEND?
 		jne	@@notsend
 		mov	al,type_register
 		mov	ebx,msend_reg
 @@notsend:
-		xor	ecx,ecx			;reset flags
+		xor	ecx,ecx				;reset flags
 
-		mov	ch,al			;save type into ch
-		mov	esi,ebx			;save address or struct id into esi
-		mov	edi,[source_ptr]	;save current source pointer into edi
+		mov	ch,al				;save type into ch
+		mov	esi,ebx				;save address or struct id into esi
+		mov	edi,[source_ptr]		;save current source pointer into edi
 
 
-		call	is_ptr			;ptr{[++/--]} ?
+		call	is_ptr				;ptr{[++/--]} ?
 		jne	@@notpostptr
-		call	check_leftb		;check for '['
+		call	check_leftb			;check for '['
 		jne	@@gotptr
-		call	get_element		;get possible ++/--
-		call	check_rightb		;check for ']'
+		call	get_element			;get possible ++/--
+		call	check_rightb			;check for ']'
 		jne	@@notpost
-		cmp	al,type_inc		;ptr[++] ?
+		cmp	al,type_inc			;ptr[++] ?
 		je	@@postinc
-		cmp	al,type_dec		;ptr[--] ?
+		cmp	al,type_dec			;ptr[--] ?
 		je	@@postdec
-		call	back_element		;not ptr[++/--], back up to after ptr
+		call	back_element			;not ptr[++/--], back up to after ptr
 @@notpost:	call	back_element
 		call	back_element
-		jmp	@@gotptr		;got ptr[++/--]
+		jmp	@@gotptr			;got ptr[++/--]
 @@postinc:	or	ecx,bc_var_postinc_push shl 24
 		jmp	@@gotptr
 @@postdec:	or	ecx,bc_var_postdec_push shl 24
 		jmp	@@gotptr
 @@notpostptr:
-		cmp	al,type_leftb		;[ptr] or [++/--]ptr ?
+		cmp	al,type_leftb			;[ptr] or [++/--]ptr ?
 		jne	@@notpreptr
-		call	get_element		;get ptr/++/--
-		call	get_rightb		;get ']'
-		call	is_ptr			;[ptr] ?
+		call	get_element			;get ptr/++/--
+		call	get_rightb			;get ']'
+		call	is_ptr				;[ptr] ?
 		je	@@ptrval
-		cmp	al,type_inc		;[++] ?
+		cmp	al,type_inc			;[++] ?
 		je	@@preinc
-		cmp	al,type_dec		;[--] ?
+		cmp	al,type_dec			;[--] ?
 		je	@@predec
-		jmp	error_eptrid		;else, error
+		jmp	error_eptrid			;else, error
 @@preinc:	or	ecx,bc_var_preinc_push shl 24
 		jmp	@@preptr
 @@predec:	or	ecx,bc_var_predec_push shl 24
-@@preptr:	call	get_element		;got [++/--], get ptr
+@@preptr:	call	get_element			;got [++/--], get ptr
 		call	is_ptr
 		jne	error_eptr
-		mov	ch,al			;save type into ch
-		mov	esi,ebx			;save value into esi
-		jmp	@@gotptr		;got [++/--]ptr
+		mov	ch,al				;save type into ch
+		mov	esi,ebx				;save value into esi
+		jmp	@@gotptr			;got [++/--]ptr
 
-@@ptrval:	mov	ch,al			;got [ptr], save type into ch
-		add	ch,4			;convert type_???_????_ptr to type_???_????_ptr_val
-		mov	esi,ebx			;save value into esi
-		mov	edi,[source_ptr]	;save current source pointer into edi
-		jmp	@@isvar			;[ptr] cannot have bitfield
+@@ptrval:	mov	ch,al				;got [ptr], save type into ch
+		add	ch,4				;convert type_???_????_ptr to type_???_????_ptr_val
+		mov	esi,ebx				;save value into esi
+		mov	edi,[source_ptr]		;save current source pointer into edi
+		jmp	@@isvar				;[ptr] cannot have bitfield
 
-@@gotptr:	mov	edi,[source_ptr]	;save current source pointer into edi
-		mov	al,ch			;al=type
-		mov	ebx,esi			;ebx=value
+@@gotptr:	mov	edi,[source_ptr]		;save current source pointer into edi
+		mov	al,ch				;al=type
+		mov	ebx,esi				;ebx=value
 @@notpreptr:
 
-		call	is_struct		;struct? (struct ptr already handled)
+		call	is_struct			;struct? (struct ptr already handled)
 		jne	@@notstruct
-		call	skip_struct_setup	;skip struct arguments
-		cmp	[compiled_struct_flags],3
-		je	@@chkbitfield		;if struct byte/word/long, may have bitfield
-		jmp	@@isvar			;struct reference cannot have bitfield
+		call	skip_struct_setup		;skip struct arguments, set compiled_struct_* data
+		cmp	[compiled_struct_flags],3	;if structure reference, cannot have bitfield
+		jne	@@isvar
+		cmp	[compiled_struct_bitfield],0	;byte/word/long, if no structure bitfield, check for normal bitfield
+		je	@@checkbf
+		call	get_dot				;structure bitfield, skip '.'
+		call	get_element			;skip structure bitfield name
+		or	ecx,var_bitfield_flag + var_bitfield_struct
+		jmp	@@isvar
 @@notstruct:
 
-		and	esi,0FFFFFh		;strip address of any register field
+		and	esi,0FFFFFh			;strip address of any register field
 
-		mov	ch,type_loc_byte	;loc byte/word/long?
+		mov	ch,type_loc_byte		;loc byte/word/long?
 		cmp	al,ch
 		jb	@@notloc
 		cmp	al,type_loc_long
 		jbe	@@lvdh
 @@notloc:
-		mov	ch,type_loc_byte_ptr	;loc byte/word/long ptr?
+		mov	ch,type_loc_byte_ptr		;loc byte/word/long ptr?
 		cmp	al,ch
 		jb	@@notlocptr
 		cmp	al,type_loc_long_ptr
 		jbe	@@lvdh
 @@notlocptr:
-		mov	ch,type_var_byte	;var byte/word/long?
+		mov	ch,type_var_byte		;var byte/word/long?
 		cmp	al,ch
 		jb	@@notvar
 		cmp	al,type_var_long
 		jbe	@@lvdh
 @@notvar:
-		mov	ch,type_var_byte_ptr	;var byte/word/long ptr?
+		mov	ch,type_var_byte_ptr		;var byte/word/long ptr?
 		cmp	al,ch
 		jb	@@notvarptr
 		cmp	al,type_var_long_ptr
 		jbe	@@lvdh
 @@notvarptr:
-		mov	ch,type_dat_byte	;dat byte/word/long?
+		mov	ch,type_dat_byte		;dat byte/word/long?
 		cmp	al,ch
 		jb	@@notdat
 		cmp	al,type_dat_long
 		jbe	@@lvdh
 @@notdat:
-		mov	ch,type_hub_byte	;hub byte/word/long?
+		mov	ch,type_hub_byte		;hub byte/word/long?
 		cmp	al,ch
 		jb	@@nothub
 		cmp	al,type_hub_long
 		jbe	@@lvdh
 @@nothub:
 
-		cmp	al,type_reg		;REG[address]?
+		cmp	al,type_reg			;REG[address]?
 		jne	@@notreg
 		call	get_leftb
 		mov	bl,10b
@@ -16295,62 +16371,63 @@ check_var:	push	eax
 		mov	esi,ebx
 		mov	edi,[source_ptr]
 @@notreg:
-		cmp	al,type_field		;FIELD[memfield]?
+		cmp	al,type_field			;FIELD[memfield]?
 		jne	@@notfield
 		mov	ch,type_field
-		call	skip_index
-		call	check_index		;check for [index]
+		call	skip_index			;skip [memfield]
+		call	check_index			;[index]?
 		jne	@@isvar
 		or	ecx,var_index_flag
 		jmp	@@isvar
 @@notfield:
-		mov	ch,al			;other
+		mov	ch,al				;other
 
-		cmp	al,type_register	;register?
+		cmp	al,type_register		;register?
 		je	@@checkindex
 
-		cmp	al,type_size		;BYTE/WORD/LONG?
-		jne	@@exit			;if not, exit with z=0
-		call	check_index		;check for [base]
-		jne	@@exit			;if not, exit with z=0
-		mov	cl,bl			;remember size
+		cmp	al,type_size			;BYTE/WORD/LONG?
+		jne	@@exit				;if not, exit with z=0
+		call	check_index			;check for [base]
+		jne	@@exit				;if not, exit with z=0
+		mov	cl,bl				;remember size
 		jmp	@@checkindex
 
-@@lvdh:		call	check_dot		;loc/var/dat/hub, check for .BYTE/WORD/LONG
+@@lvdh:		call	check_dot			;loc/var/dat/hub, check for .BYTE/WORD/LONG
 		jne	@@lvdhnodot
-		push	eax			;got '.', check for BYTE/WORD/LONG
+		push	eax				;got '.', check for BYTE/WORD/LONG
 		call	get_element
 		cmp	al,type_size
 		mov	cl,bl
 		pop	eax
 		jne	@@lvdhbackup
-		or	ecx,var_size_override	;got .BYTE/WORD/LONG, set size override flag
+		or	ecx,var_size_override		;got .BYTE/WORD/LONG, set size override flag
 		jmp	@@checkindex
 @@lvdhbackup:	call	back_element
 		call	back_element
-@@lvdhnodot:	mov	cl,al			;get size into cl
+@@lvdhnodot:	mov	cl,al				;get size into cl
 		sub	cl,ch
 
-@@checkindex:	call	check_index		;check for [index]
+@@checkindex:	call	check_index			;check for [index]
 		jne	@@noindex
 		or	ecx,var_index_flag
 @@noindex:
-@@chkbitfield:	call	check_dot		;check for .[bitfield]
+@@checkbf:	call	check_dot			;check for .[bitfield]
 		jne	@@nobf
-		or	ecx,var_bitfield_flag	;set bitfield flag
-		call	get_leftb		;get '['
-		call	skip_exp_check_con	;skip expression, checking for constant
-		jnz	@@notcon
+		or	ecx,var_bitfield_flag		;set bitfield flag
+		call	get_leftb			;get '['
+		lea	eax,[skip_exp_check_con]	;skip expression, checking for constant
+		call	preserve_compiled_struct
+		jnz	@@bfnotcon
 		or	ecx,var_bitfield_con
-@@notcon:	call	check_dotdot		;check for '..'
+@@bfnotcon:	call	check_dotdot			;check for '..'
 		jne	@@bfrb
-		call	skip_exp_check_con	;skip expression, checking for constant
+		lea	eax,[skip_exp_check_con]	;skip expression, checking for constant
+		call	preserve_compiled_struct
 		jz	@@bfrb
 		and	ecx,not var_bitfield_con
-@@bfrb:		call	get_rightb		;get ']'
-		mov	[compiled_struct_flags],3	;set struct byte/word/long in case disturbed by skip_exp_check_con
+@@bfrb:		call	get_rightb			;get ']'
 @@nobf:
-@@isvar:	xor	eax,eax			;z=1
+@@isvar:	xor	eax,eax				;z=1
 
 @@exit:		pop	ebx
 		pop	eax
@@ -16368,51 +16445,51 @@ compile_var:	push	eax
 		push	edx
 		push	[source_ptr]
 
-		mov	[source_ptr],edi	;point after var
+		mov	[source_ptr],edi		;point after var
 
 
-		test	ecx,var_bitfield_flag	;compile any non-constant bitfield first
+		test	ecx,var_bitfield_flag		;compile any non-constant bitfield first
 		jz	@@nobf
-		test	ecx,var_bitfield_con	;if bitfield-constant, nothing to compile here
+		test	ecx,var_bitfield_con + var_bitfield_struct	;if bitfield constant or structure, nothing to compile here
 		jnz	@@nobf
 
-		push	[source_ptr]		;save source_ptr
-		mov	al,ch			;if struct, skip it
+		push	[source_ptr]			;save source_ptr
+		mov	al,ch				;if struct, skip it
 		call	is_struct
 		jne	@@bfnotstruct
 		mov	ebx,esi
 		call	skip_struct_setup
-@@bfnotstruct:	cmp	ch,type_size		;if byte/word/long, skip [base]
+@@bfnotstruct:	cmp	ch,type_size			;if byte/word/long, skip [base]
 		jne	@@bfnotsize
 		call	skip_index
-@@bfnotsize:	test	ecx,var_size_override	;if size override, skip .BYTE/WORD/LONG
+@@bfnotsize:	test	ecx,var_size_override		;if size override, skip .BYTE/WORD/LONG
 		jz	@@bfnsor
 		call	get_dot
 		call	get_size
-@@bfnsor:	test	ecx,var_index_flag	;if index, skip [index]
+@@bfnsor:	test	ecx,var_index_flag		;if index, skip [index]
 		jz	@@bfnoindex
 		call	skip_index
-@@bfnoindex:	call	get_dot			;get '.'
-		call	get_leftb		;get '['
-		call	compile_exp		;compile bitfield expression
-		call	check_dotdot		;'top..bottom'?
+@@bfnoindex:	call	get_dot				;get '.'
+		call	get_leftb			;get '['
+		call	compile_exp			;compile bitfield expression
+		call	check_dotdot			;'top..bottom'?
 		jne	@@bfnotspan
 		call	compile_exp
 		mov	al,bc_bitrange
 		call	enter_obj
 		mov	al,bc_addbits
 		call	enter_obj
-@@bfnotspan:	call	get_rightb		;get ']'
-		pop	[source_ptr]		;restore source_ptr
+@@bfnotspan:	call	get_rightb			;get ']'
+		pop	[source_ptr]			;restore source_ptr
 @@nobf:
 
-		mov	al,ch			;[hubptr/structptr]?
+		mov	al,ch				;[hubptr/structptr]?
 		call	is_ptr_val
 		jne	@@notptrval
 
-		mov	ebx,1			;set default inc/dec value to 1
+		mov	ebx,1				;set default inc/dec value to 1
 
-		cmp	dl,2			;check for assign plus pre/post-inc/dec
+		cmp	dl,2				;check for assign plus pre/post-inc/dec
 		jne	@@ptrvalx
 		cmp	dh,bc_var_inc
 		je	@@ptrvalincdec
@@ -16453,50 +16530,50 @@ compile_var:	push	eax
 		mov	ch,type_loc_byte
 		jmp	@@ptrvalloc
 @@ptrvalvar:	mov	ch,type_var_byte
-@@ptrvalloc:	mov	cl,2			;set long size
-		and	esi,0FFFFFh		;mask away any struct id
-		call	compile_var		;compile pointer variable assign
-		cmp	ebx,1			;if no special inc/dec value, done
+@@ptrvalloc:	mov	cl,2				;set long size
+		and	esi,0FFFFFh			;mask away any struct id
+		call	compile_var			;compile pointer variable assign
+		cmp	ebx,1				;if no special inc/dec value, done
 		jz	@@done
 
-		dec	[obj_ptr]		;special inc/dec value, back up over pre/post-inc/dec assign
-		mov	al,bc_set_incdec	;compile inc/dec-value modifier and special inc/dec value
+		dec	[obj_ptr]			;special inc/dec value, back up over pre/post-inc/dec assign
+		mov	al,bc_set_incdec		;compile inc/dec value modifier and special inc/dec value
 		call	enter_obj
 		mov	eax,ebx
 		call	compile_rfvar
-		mov	al,dh			;reenter pre/post-inc/dec assign
+		mov	al,dh				;reenter pre/post-inc/dec assign
 		jmp	@@enter
 @@notptrval:
 
-		mov	al,ch			;hubptr/structptr?
+		mov	al,ch				;hubptr/structptr?
 		call	is_ptr
 		jne	@@notptr
-		call	is_struct_ptr		;structptr will be handled as struct
+		call	is_struct_ptr			;structptr will be handled as struct
 		je	@@notptr
 
-		push	ecx			;save type, size, and flags
-		push	edx			;save read/write/assign
-		mov	edx,ecx			;check for pre/post-inc/dec-push assign
+		push	ecx				;save type, size, and flags
+		push	edx				;save read/write/assign
+		mov	edx,ecx				;check for pre/post-inc/dec-push assign
 		shr	edx,24
-		jz	@@ptrnoas		;if no assign, read (dl=0)
-		mov	dh,dl			;assign, dh=bytecode, dl=2
+		jz	@@ptrnoas			;if no assign, read (dl=0)
+		mov	dh,dl				;assign, dh=bytecode, dl=2
 		mov	dl,2
-@@ptrnoas:	add	ch,4			;convert type_loc/dat_byte_ptr to type_loc/dat_byte_ptr_val
-		add	ch,cl			;add in size
-		movzx	ecx,cx			;clear all variable flags to inhibit any special compilation
-		call	compile_var		;compile read/assign of pointer variable
-		pop	edx			;restore read/write/assign
-		pop	ecx			;restore type, size, and flags
+@@ptrnoas:	add	ch,4				;convert type_loc/dat_byte_ptr to type_loc/dat_byte_ptr_val
+		add	ch,cl				;add in size
+		movzx	ecx,cx				;clear all variable flags to inhibit any special compilation
+		call	compile_var			;compile read/assign of pointer variable
+		pop	edx				;restore read/write/assign
+		pop	ecx				;restore type, size, and flags
 
-		test	ecx,var_size_override	;if size override, skip .BYTE/WORD/LONG
+		test	ecx,var_size_override		;if size override, skip .BYTE/WORD/LONG
 		jz	@@ptrnosor
 		call	get_dot
 		call	get_size
 @@ptrnosor:
-		test	ecx,var_index_flag	;index?
-		mov	al,bc_setup_byte_pa	;without index
+		test	ecx,var_index_flag		;index?
+		mov	al,bc_setup_byte_pa		;without index
 		jz	@@ptrni
-		call	compile_index		;with index
+		call	compile_index			;with index
 		mov	al,bc_setup_byte_pb_pi
 @@ptrni:	add	al,cl
 		jmp	@@entersetup
@@ -16506,7 +16583,7 @@ compile_var:	push	eax
 		call	is_struct
 		jne	@@notstruct
 
-		mov	ebx,esi					;compile struct setup
+		mov	ebx,esi					;compile struct setup, updates compiled_struct_* data, needs preserving
 		call	compile_struct_setup
 		cmp	[compiled_struct_flags],3		;if not byte/word/long member, handle (sub)struct
 		jne	@@structnotbwl
@@ -16521,7 +16598,7 @@ compile_var:	push	eax
 		jne	@@structnindex				;optimize type_loc/var/dat_struct using normal setups, index?
 		or	ecx,var_index_flag			;if index after byte/word/long member, set index flag
 @@structnindex:	sub	ch,3					;convert type_loc/var/dat_struct to type_loc/var/dat_byte
-		mov	cl,[compiled_struct_word_size]		;get 0/1/2 (byte/word/long) size in cl
+		mov	cl,[byte compiled_struct_word_size]	;get 0/1/2 (byte/word/long) size in cl
 		mov	esi,[compiled_struct_address]		;get byte/word/long base-offset address in esi
 		mov	eax,[compiled_struct_source_ptr]	;set source_ptr after byte/word/long member, before any index
 		mov	[source_ptr],eax
@@ -16544,10 +16621,10 @@ compile_var:	push	eax
 		jmp	@@enter
 @@notstruct:
 
-		cmp	ch,type_field		;FIELD[memfield]?
+		cmp	ch,type_field			;FIELD[memfield]?
 		jne	@@notfield
 		call	compile_index
-		test	ecx,var_index_flag	;index?
+		test	ecx,var_index_flag		;index?
 		mov	al,bc_setup_field_p
 		jz	@@entersetup
 		call	compile_index
@@ -16555,204 +16632,210 @@ compile_var:	push	eax
 		jmp	@@entersetup
 @@notfield:
 
-		cmp	ch,type_register	;register?
+		cmp	ch,type_register		;register?
 		jne	@@notreg
 
-		cmp	esi,prx_regs+0		;pr0..pr7 with no index?
+		cmp	esi,prx_regs+0			;pr0..pr7 with no index?
 		jb	@@notregpasm
 		cmp	esi,prx_regs+7
 		ja	@@notregpasm
-		test	ecx,var_index_flag	;index?
+		test	ecx,var_index_flag		;index?
 		jnz	@@notregpasm
-		mov	eax,esi			;enter setup $1F8..$1FF bytecode
+		mov	eax,esi				;enter setup $1F8..$1FF bytecode
 		sub	eax,prx_regs
 		add	eax,bc_setup_reg_1D8_1F8+0
 		jmp	@@entersetup
 @@notregpasm:
-		cmp	esi,1F8h		;$1F8..$1FF with no index?
+		cmp	esi,1F8h			;$1F8..$1FF with no index?
 		jb	@@notregio
 		cmp	esi,1FFh
 		ja	@@notregio
-		test	ecx,var_index_flag	;index?
+		test	ecx,var_index_flag		;index?
 		jnz	@@notregio
-		mov	eax,esi			;enter setup $1F8..$1FF bytecode
+		mov	eax,esi				;enter setup $1F8..$1FF bytecode
 		sub	eax,1F8h
 		add	eax,bc_setup_reg_1D8_1F8+8
 		jmp	@@entersetup
 @@notregio:
-		test	ecx,var_index_flag	;register index?
-		mov	al,bc_setup_reg		;get non-index bytecode
-		jz	@@notregi		;if no index, got bytecode and reg
-		call	@@compileindex		;compile index, checking for constant
-		mov	al,bc_setup_reg_pi	;get index bytecode
-		jnz	@@notregi		;if not constant index, got bytecode and reg
-		mov	al,bc_setup_reg		;constant, revert to non-index bytecode	TESTT could be optimized to use single bytecode by having two: one for $0xx and one for $1xx
-		call	enter_obj		;enter setup bytecode
-		mov	eax,esi			;get reg address plus index
-		add	eax,[con_value]		;add index into reg
+		test	ecx,var_index_flag		;register index?
+		mov	al,bc_setup_reg			;get non-index bytecode
+		jz	@@notregi			;if no index, got bytecode and reg
+		call	@@compile_index_check_con	;compile index, checking for constant
+		mov	al,bc_setup_reg_pi		;get index bytecode
+		jnz	@@notregi			;if not constant index, got bytecode and reg
+		mov	al,bc_setup_reg			;constant, revert to non-index bytecode	TESTT could be optimized to use single bytecode by having two: one for $0xx and one for $1xx
+		call	enter_obj			;enter setup bytecode
+		mov	eax,esi				;get reg address plus index
+		add	eax,[con_value]			;add index into reg
 		jmp	@@regsignx
-@@notregi:	call	enter_obj		;enter setup bytecode
-		mov	eax,esi			;get reg address
-@@regsignx:	shl	eax,32-9		;sign-extend address to express bottom/top reg addresses in one byte
+@@notregi:	call	enter_obj			;enter setup bytecode
+		mov	eax,esi				;get reg address
+@@regsignx:	shl	eax,32-9			;sign-extend address to express bottom/top reg addresses in one byte
 		sar	eax,32-9
-		call	compile_rfvars		;compile rfvars for base register
+		call	compile_rfvars			;compile rfvars for base register
 		jmp	@@enterbit
 @@notreg:
 
-		cmp	ch,type_size		;BYTE/WORD/LONG?
+		cmp	ch,type_size			;BYTE/WORD/LONG?
 		jne	@@notsize
-		test	ecx,var_index_flag	;index?
-		mov	al,bc_setup_byte_pa	;without index
+		test	ecx,var_index_flag		;index?
+		mov	al,bc_setup_byte_pa		;without index
 		jz	@@sizeni
-		call	compile_index		;with index
+		call	compile_index			;with index
 		mov	al,bc_setup_byte_pb_pi
 @@sizeni:	call	compile_index
 		add	al,cl
 		jmp	@@entersetup
 @@notsize:
 
-		test	ecx,var_size_override	;if size override, skip .BYTE/WORD/LONG
+		test	ecx,var_size_override		;if size override, skip .BYTE/WORD/LONG
 		jz	@@nosor
 		call	get_dot
 		call	get_size
 @@nosor:
 
-		cmp	ch,type_var_byte	;first 16 var longs with no index?
-		jne	@@notvar16
-		cmp	cl,2			;long?
-		jne	@@notvar16
-		test	esi,11b			;long aligned?
-		jnz	@@notvar16
-		cmp	esi,16*4		;first 16?
-		jae	@@notvar16
-		test	ecx,var_index_flag	;no index?
-		jnz	@@notvar16
-		mov	eax,esi			;get address nibble
-		shr	eax,2
-		or	al,bc_setup_var_0_15	;setup, also used for read/write bitfield
-		jmp	@@entersetup
-@@notvar16:
-
-		cmp	ch,type_loc_byte	;first 16 local longs with no index?
-		jne	@@notloc16
-		cmp	cl,2			;long?
-		jne	@@notloc16
-		test	esi,11b			;long aligned?
-		jnz	@@notloc16
-		cmp	esi,16*4		;first 16?
-		jae	@@notloc16
-		test	ecx,var_index_flag	;no index?
-		jnz	@@notloc16
-		mov	eax,esi			;get address nibble
-		shr	eax,2
-		test	ecx,var_bitfield_flag	;if bitfield, use setup
-		jnz	@@loc16setup
-		cmp	dl,2			;setup?
-		jae	@@loc16setup
-		cmp	dl,1			;write?
-		je	@@loc16write
-		or	al,bc_read_local_0_15	;read
-		jmp	@@enter
-@@loc16write:	or	al,bc_write_local_0_15	;write
-		jmp	@@enter
-@@loc16setup:	or	al,bc_setup_local_0_15	;setup, also used for read/write bitfield
-		jmp	@@entersetup
-@@notloc16:
-
-		cmp	ch,type_hub_byte	;hub byte/word/long with possible index?
+		cmp	ch,type_hub_byte		;hub byte/word/long with possible index?
 		jne	@@nothub
-
-		push	ebx			;compile address
+		push	ebx				;compile address
 		mov	ebx,esi
 		call	compile_constant
 		pop	ebx
-		test	ecx,var_index_flag	;index?
-		mov	al,bc_setup_byte_pa	;without index
+		test	ecx,var_index_flag		;index?
+		mov	al,bc_setup_byte_pa		;without index
 		jz	@@hubni
-		call	compile_index		;with index
+		call	compile_index			;with index
 		mov	al,bc_setup_byte_pb_pi
 @@hubni:	add	al,cl
 		jmp	@@entersetup
 @@nothub:
 
-		mov	al,cl			;pbase/vbase/dbase byte/word/long with possible index
-		mov	ah,6			;get size*6 to begin setup bytecode
+		cmp	ch,type_var_byte		;first 16 var longs with no index?
+		jne	@@notvar16
+		cmp	cl,2				;long?
+		jne	@@notvar16
+		test	esi,11b				;long aligned?
+		jnz	@@notvar16
+		cmp	esi,16*4			;first 16?
+		jae	@@notvar16
+		test	ecx,var_index_flag		;no index?
+		jnz	@@notvar16
+		mov	eax,esi				;get address nibble
+		shr	eax,2
+		or	al,bc_setup_var_0_15		;setup, also used for read/write bitfield
+		jmp	@@entersetup
+@@notvar16:
+
+		cmp	ch,type_loc_byte		;first 16 local longs with no index?
+		jne	@@notloc16
+		cmp	cl,2				;long?
+		jne	@@notloc16
+		test	esi,11b				;long aligned?
+		jnz	@@notloc16
+		cmp	esi,16*4			;first 16?
+		jae	@@notloc16
+		test	ecx,var_index_flag		;no index?
+		jnz	@@notloc16
+		mov	eax,esi				;get address nibble
+		shr	eax,2
+		test	ecx,var_bitfield_flag		;if bitfield, use setup
+		jnz	@@loc16setup
+		cmp	dl,2				;setup?
+		jae	@@loc16setup
+		cmp	dl,1				;write?
+		je	@@loc16write
+		or	al,bc_read_local_0_15		;read
+		jmp	@@enter
+@@loc16write:	or	al,bc_write_local_0_15		;write
+		jmp	@@enter
+@@loc16setup:	or	al,bc_setup_local_0_15		;setup, also used for read/write bitfield
+		jmp	@@entersetup
+@@notloc16:
+
+		mov	al,cl				;pbase/vbase/dbase byte/word/long with possible index
+		mov	ah,6				;get size*6 to begin setup bytecode
 		mul	ah
 		add	al,bc_setup_byte_pbase
-		cmp	ch,type_dat_byte	;pbase?
+		cmp	ch,type_dat_byte		;pbase?
 		je	@@gotbase
 		inc	al
-		cmp	ch,type_var_byte	;vbase?
+		cmp	ch,type_var_byte		;vbase?
 		je	@@gotbase
-		inc	al			;dbase
-@@gotbase:	test	ecx,var_index_flag	;index?
+		inc	al				;dbase
+@@gotbase:	test	ecx,var_index_flag		;index?
 		jz	@@baseni
-		add	al,3			;index, make index bytecode
-		call	@@compileindex		;compile index, checking for constant
-		jnz	@@baseni		;if not constant, keep compiled index
-		sub	al,3			;constant, revert to non-index bytecode
-		call	enter_obj		;enter setup bytecode
-		shl	[con_value],cl		;scale index constant
-		mov	eax,esi			;get offset plus scaled index constant
+		add	al,3				;index, make index bytecode
+		call	@@compile_index_check_con	;compile index, checking for constant (preserves compiled_struct_* data)
+		jnz	@@baseni			;if not constant, keep compiled index
+		sub	al,3				;constant, revert to non-index bytecode
+		call	enter_obj			;enter setup bytecode
+		shl	[con_value],cl			;scale index constant
+		mov	eax,esi				;get offset plus scaled index constant
 		add	eax,[con_value]
-		call	compile_rfvar		;compile rfvar for base offset
+		call	compile_rfvar			;compile rfvar for base offset
 		jmp	@@enterbit
 @@baseni:
-		call	enter_obj		;enter setup bytecode
-		mov	eax,esi			;compile rfvar for base offset
+		call	enter_obj			;enter setup bytecode
+		mov	eax,esi				;compile rfvar for base offset
 		call	compile_rfvar
 		jmp	@@enterbit
 
 
-@@entersetup:	call	enter_obj		;enter variable-setup bytecode
+@@entersetup:	call	enter_obj			;enter variable-setup bytecode
 
 
-@@enterbit:	test	ecx,var_bitfield_flag	;bitfield?
+@@enterbit:	test	ecx,var_bitfield_flag		;bitfield?
 		jz	@@nobit
-		call	get_dot			;get '.'
-		call	get_leftb		;get '['
-		test	ecx,var_bitfield_con	;constant bitfield?
-		jnz	@@bfcon
-		mov	al,bc_setup_bfield_pop	;not constant bitfield, already compiled
-		call	skip_exp		;skip bitfield
-		call	check_dotdot
-		jne	@@bitsetup
-		call	skip_exp
-		jmp	@@bitsetup
-@@bfcon:
-		call	skip_exp_check_con	;skip expression, getting constant
-		jnz	error_eicon		;(should not error)
-		mov	eax,[con_value]		;get constant
+
+		test	ecx,var_bitfield_struct		;structure bitfield?
+		jz	@@bfnotstruct2
+
+		call	get_dot				;structure bitfield, get '.'
+		call	get_element			;skip structure bitfield name
+		mov	eax,[compiled_struct_bitfield]	;get structure bitfield value
 		and	eax,3FFh
-		call	check_dotdot		;check for '..'
-		jne	@@bitcompile
-		call	skip_exp_check_con	;skip expression, getting constant
-		jnz	error_eicon		;(should not error)
-		sub	eax,[con_value]		;get size of bitspan in eax
+		call	@@compile_bitfield		;compile bitfield
+		jmp	@@nobit
+@@bfnotstruct2:
+		test	ecx,var_bitfield_con		;constant or variable bitfield?
+		jz	@@bfnotcon
+
+		call	get_dot				;constant bitfield, get '.'
+		call	get_leftb			;get '['
+		call	skip_exp_check_con		;skip expression, getting constant
+		jnz	error_eicon			;(should not error)
+		mov	eax,[con_value]			;get constant
+		and	eax,3FFh
+		call	check_dotdot			;check for '..'
+		jne	@@bfgotcon
+		call	skip_exp_check_con		;skip expression, getting constant
+		jnz	error_eicon			;(should not error)
+		sub	eax,[con_value]			;get size of bitspan in eax
 		and	eax,1Fh
 		shl	eax,5
 		and	[con_value],1Fh
 		or	eax,[con_value]
-@@bitcompile:	cmp	eax,31
-		jbe	@@bitcon0to31
-		push	eax			;>31, bitfield-rfvar
-		mov	al,bc_setup_bfield_rfvar
+@@bfgotcon:	call	@@compile_bitfield
+		call	get_rightb			;get ']'
+		jmp	@@nobit
+@@bfnotcon:
+		call	get_dot				;variable bitfield (already compiled), get '.'
+		call	get_leftb			;get '['
+		call	skip_exp			;skip already-compiled bitfield exp{..exp}
+		call	check_dotdot
+		jne	@@bfnotdotdot
+		call	skip_exp
+@@bfnotdotdot:	mov	al,bc_setup_bfield_pop		;setup bitfield by runtime pop
 		call	enter_obj
-		pop	eax
-		call	compile_rfvar
-		jmp	@@bitrightb
-@@bitcon0to31:	add	al,bc_setup_bfield_0_31	;bitfield-0..31
-@@bitsetup:	call	enter_obj
-@@bitrightb:	call	get_rightb		;get ']'
+		call	get_rightb			;get ']'
 @@nobit:
 
-		mov	al,bc_read		;read?
+		mov	al,bc_read			;read?
 		cmp	dl,0
 		je	@@enter
-		mov	al,bc_write		;write?
+		mov	al,bc_write			;write?
 		cmp	dl,1
 		je	@@enter
-		mov	al,dh			;assign
+		mov	al,dh				;assign
 @@enter:	call	enter_obj
 
 @@done:		pop	[source_ptr]
@@ -16764,60 +16847,75 @@ compile_var:	push	eax
 
 
 
-@@compileindex:	call	get_leftb		;get '['
-		call	compile_exp_check_con	;compile index, check for constant
+@@compile_index_check_con:				;preserves compiled_struct_* data
+		push	eax
+		call	get_leftb			;get '['
+		lea	eax,[compile_exp_check_con]	;compile expression, check for constant
+		call	preserve_compiled_struct
 		pushf
-		call	get_rightb		;get ']'
+		call	get_rightb			;get ']'
 		popf
+		pop	eax
 		ret
+
+@@compile_bitfield:
+		cmp	eax,31				;compile bitfield
+		ja	@@multibit
+		add	al,bc_setup_bfield_0_31		;single-bit
+		jmp	enter_obj
+@@multibit:	push	eax				;multi-bit
+		mov	al,bc_setup_bfield_rfvar
+		call	enter_obj
+		pop	eax
+		jmp	compile_rfvar
 ;
 ;
 ; Compile var operations
 ;
 compile_var_clrset_inst:
 
-		mov	al,dl			;var~/var~~ instruction
-		call	enter_obj		;compile 0/-1
-		mov	dl,1			;(write)
+		mov	al,dl				;var~/var~~ instruction
+		call	enter_obj			;compile 0/-1
+		mov	dl,1				;(write)
 		jmp	compile_var
 
 compile_var_read:
 
 		call	get_variable
-		mov	dl,0			;(read)
+		mov	dl,0				;(read)
 		jmp	compile_var
 
 compile_var_write:
 
 		call	get_variable
-		mov	dl,1			;(write)
+		mov	dl,1				;(write)
 		jmp	compile_var
 
 compile_var_clrset_term:
 
-		mov	al,dl			;var~/var~~ term
-		call	enter_obj		;compile 0/-1
+		mov	al,dl				;var~/var~~ term
+		call	enter_obj			;compile 0/-1
 		mov	dh,bc_var_swap
 		jmp	compile_var_assign
 
 compile_var_exp:
 
-		call	compile_exp		;var := exp, compile expression
+		call	compile_exp			;var := exp, compile expression
 		jmp	compile_var_assign
 
 compile_var_pre:
 
-		call	get_variable		;<unary> var
+		call	get_variable			;<unary> var
 		jmp	compile_var_assign
 
 compile_var_addr:
 
-		mov	dh,bc_get_addr		;@var
+		mov	dh,bc_get_addr			;@var
 		jmp	compile_var_assign
 
 compile_var_assign:
 
-		mov	dl,2			;(assign)
+		mov	dl,2				;(assign)
 		jmp	compile_var
 ;
 ;
@@ -16825,17 +16923,17 @@ compile_var_assign:
 ;
 ; on entry:
 ;
-;   struct_name[address]{[index]}{{.byte/word/long/struct{[index]} ...}
+;   struct_name[address]{[index]}{{.byte/word/long/struct{[index]} ...}{.bitfield}
 ;
 ;	al = type_con_struct, ebx = struct id
 ;
-;   struct_var{[index]}{{.byte/word/long/struct{[index]} ...}
+;   struct_var{[index]}{{.byte/word/long/struct{[index]} ...}{.bitfield}
 ;
 ;	al = type_loc_struct, ebx.[31..20] = struct id, ebx.[19..0] = loc address of structure
 ;	al = type_var_struct, ebx.[31..20] = struct id, ebx.[19..0] = var address of structure
 ;	al = type_dat_struct, ebx.[31..20] = struct id, ebx.[19..0] = dat address of structure
 ;
-;   {[++/--]}struct_ptr{[++/--]}{[index]}{{.byte/word/long/struct{[index]} ...}
+;   {[++/--]}struct_ptr{[++/--]}{[index]}{{.byte/word/long/struct{[index]} ...}{.bitfield}
 ;
 ;	al = type_loc_struct_ptr, ebx.[31..20] = struct id, ebx.[19..0] = loc address of ptr, ecx[31..24] = pre/post-inc/dec-push or 0 for read
 ;	al = type_var_struct_ptr, ebx.[31..20] = struct id, ebx.[19..0] = var address of ptr, ecx[31..24] = pre/post-inc/dec-push or 0 for read
@@ -16859,6 +16957,9 @@ compile_var_assign:
 ;					  1 if single index on byte/word/long member (can be optimized)
 ;					  else other case (cannot be optimized)
 ;
+;	compiled_struct_bitfield	= 0 if no bitfield member was found
+;					= 80000000h + bitfield value if bitfield was found
+;
 ;
 ; Optimization is possible if the following are all true:
 ;
@@ -16869,12 +16970,12 @@ compile_var_assign:
 ;
 ; To optimize for compile_var, set registers as follows:
 ;
-;	cl		= compiled_struct_word_size (0/1/2 for byte/word/long)
-;	ch		= ch - 3 (type_???_struct --> type_???_byte)
-;	ecx.17		= 1 if compiled_struct_index_mode == 1
-;	esi		= compiled_struct_address
-;	source_ptr	= compiled_struct_source_ptr
-;	obj_ptr		= compiled_struct_obj_ptr
+;	cl			= compiled_struct_word_size (0/1/2 for byte/word/long)
+;	ch			= ch - 3 (type_???_struct --> type_???_byte)
+;	ecx.var_index_flag	= 1 if compiled_struct_index_mode == 1
+;	esi			= compiled_struct_address
+;	source_ptr		= compiled_struct_source_ptr
+;	obj_ptr			= compiled_struct_obj_ptr
 ;
 ;
 skip_struct_setup:
@@ -16894,8 +16995,10 @@ compile_struct_setup:
 		push	esi
 		push	edi
 
-		mov	[byte @@struct_type],al		;save structure type
-		mov	[byte @@flags],0		;clear flags
+		movzx	eax,al
+		mov	[@@struct_type],eax		;save structure type
+		mov	[@@flags],0			;clear flags
+		mov	[@@bitfield],0			;clear bitfield
 
 		cmp	al,type_con_struct		;type_con_struct? (ebx = struct id)
 		jne	@@notpopstruct
@@ -16931,7 +17034,7 @@ compile_struct_setup:
 		mov	[@@offset],eax			;init offset loc/var/dat address
 @@gotsetup20:	shr	ebx,20				;get struct id
 @@gotsetup:
-		mov	[@@index_count],0		;{[index]}{{.byte/word/long/struct{[index]} ...}
+		mov	[@@index_count],0		;{[index]}{{.byte/word/long/struct{[index]} ...}{.bitfield}
 
 		lea	esi,[struct_def]		;point to start of structure record
 		add	esi,[struct_id_to_def+ebx*4]
@@ -16942,62 +17045,58 @@ compile_struct_setup:
 		lodsd					;get structure size
 		mov	[@@size],eax
 
-		call	@@handleindex			;handle structure index
+		mov	[@@word_size],3			;set word size to 3 (structure) in case no member
 
-		mov	[byte @@word_size],3		;set word size to 3 in case no member
+		cmp	[byte esi+4+1],0		;if structure is single nameless byte/word/long,
+		jne	@@notsinglebwl
+		or	[byte @@flags],01b		;..set index/dot flag to indicate not base structure
+		lodsd					;..get offset
+		mov	[@@member_offset],eax
+		lodsb					;..get type
+		mov	[byte @@member_type],al
+		lodsb					;..skip name length (0) and name (empty)
+		jmp	@@singlebwl			;..skip structure index and name check, handle byte/word/long
+@@notsinglebwl:
+		call	@@handleindex			;handle structure index
 
 		call	check_dot			;check for '.'
 		jne	@@compile			;if no '.' then compile setup
 
-		call	check_leftb			;if '.[', bitfield, back up to '.' and compile setup
-		jne	@@notbitfield
-		call	back_element
-		call	back_element
-		jmp	@@compile
-@@notbitfield:
+		call	check_leftb			;if '.[', regular bitfield, back up to '.' and compile setup
+		je	@@compileback2
+
 		or	[byte @@flags],01b		;set index/dot flag
 
-		call	get_symbol			;get symbol, ecx holds length
-		jc	error_easmn
-		mov	[@@symbol_length],ecx
+		call	@@getname			;get name from source
 
 
 @@checkmember:	lodsd					;(next) structure member, get offset
 		mov	[@@member_offset],eax
+
 		lodsb					;get type
 		mov	[byte @@member_type],al
+
 		cmp	al,3				;struct type?
 		jne	@@notstruct
-		mov	edx,esi				;remember sub-struct record offset
-		movzx	eax,[word esi]			;skip sub-struct record for now
+		mov	edx,esi				;remember nested sub-struct record offset
+		movzx	eax,[word esi]			;skip nested sub-struct record for now
 		add	esi,eax
-@@notstruct:	lodsb					;get member name length
-		movzx	ecx,al				;copy member name to symbol2
-		lea	edi,[symbol2]
-	rep	movsb
+@@notstruct:
+		call	@@checkname			;check name against member name
+		jne	@@mismatch
 
-		mov	ecx,[@@symbol_length]		;compare member name length
-		cmp	cl,al
-		jne	@@notmatch
-
-		push	esi				;compare member name
-		lea	esi,[symbol]
-		lea	edi,[symbol2]
-	repe	cmpsb
-		pop	esi
-		jne	@@notmatch
-
-		mov	eax,[@@member_offset]		;got match, update offset
+@@singlebwl:	mov	eax,[@@member_offset]		;got match, update offset
 		add	[@@offset],eax
 
-		mov	cl,[byte @@member_type]		;sub-struct? (3)
-		cmp	cl,3
-		jne	@@notstruct2			;if not struct, byte/word/long
-		mov	esi,edx				;struct, repoint to sub-struct
+		mov	cl,[byte @@member_type]		;get type
+
+		cmp	cl,3				;if struct (3), enter nested substruct
+		jne	@@notstruct2
+		mov	esi,edx
 		jmp	@@structloop
 @@notstruct2:
-		or	[byte @@flags],10b		;byte/word/long (0/1/2), set byte/word/long flag
 
+		or	[byte @@flags],10b		;byte/word/long (0/1/2), set byte/word/long flag
 		mov	[byte @@word_size],cl		;set word size to 0/1/2 for byte word long
 		mov	eax,1				;set size to 1/2/4
 		shl	eax,cl
@@ -17014,13 +17113,49 @@ compile_struct_setup:
 		je	@@gotindex			;..may be static index, so remember source_ptr
 		push	[source_ptr]
 		pop	[@@post_source_ptr]
-@@gotindex:	jmp	@@compile			;compile setup
+@@gotindex:
+		lodsb					;if no member bitfields to check for, compile setup
+		cmp	al,2
+		jne	@@compile
 
-@@notmatch:	lodsb					;not found, another member to check?
+		call	check_dot			;if no '.' then compile setup
+		jne	@@compile
+
+		call	check_leftb			;if '.[', regular bitfield, back up to '.' and compile setup
+		je	@@compileback2
+
+		call	@@getname			;get name from source
+@@checkbfname:	call	@@checkname			;check name against member bitfield name
+		je	@@gotbfname			;if match, get bitfield value and compile setup
+		lodsw					;mismatch, skip bitfield value
+		lodsb					;loop if another member bitfield name
+		cmp	al,2
+		je	@@checkbfname
+		jmp	error_sdnctn			;no member bitfield name match, error
+
+@@gotbfname:	mov	eax,80000000h			;match, get bitfield and compile setup
+		lodsw					;get bitfield value
+		mov	[@@bitfield],eax
+		jmp	@@compileback2			;back up to '.' and compile setup
+
+
+@@mismatch:	cmp	[byte esi],2			;skip any bitfield members (only for byte/word/long)
+		jne	@@nextmember
+		inc	esi
+		lodsb
+		add	al,2
+		movzx	eax,al
+		add	esi,eax
+		jmp	@@mismatch
+
+@@nextmember:	lodsb					;name not found, another member to check?
 		cmp	al,0
 		jne	@@checkmember
 		jmp	error_sdnctn
 
+
+@@compileback2:	call	back_element			;back up twice before compiling setup
+		call	back_element
 
 @@compile:	mov	eax,[obj_ptr]			;remember initial obj_ptr in case later optimization
 		mov	[@@initial_obj_ptr],eax
@@ -17072,7 +17207,7 @@ compile_struct_setup:
 		mov	al,bc_setup_struct_pop		;type_con_struct / type_loc_struct_ptr / type_var_struct_ptr
 @@gotbc:	call	enter_obj
 
-		movzx	eax,[byte @@word_size]		;enter rfvar value: 20 address bits, 2 size bits, 2 index-count bits
+		mov	eax,[@@word_size]		;enter rfvar value: 20 address bits, 2 size bits, 2 index-count bits
 		inc	al
 		and	al,11b				;structure/byte/word/long = 0/1/2/3
 		shl	al,2
@@ -17088,8 +17223,8 @@ compile_struct_setup:
 		call	compile_rfvar
 		loop	@@indexexp2
 @@noindexexp2:
-		mov	al,[byte @@flags]		;set flags
-		mov	[compiled_struct_flags],al
+		mov	eax,[@@flags]			;set flags
+		mov	[compiled_struct_flags],eax
 
 		mov	eax,[@@size]			;set structure/byte/word/long size
 		mov	[compiled_struct_size],eax
@@ -17097,8 +17232,8 @@ compile_struct_setup:
 		mov	eax,[@@offset]			;set address
 		mov	[compiled_struct_address],eax
 
-		mov	al,[byte @@word_size]		;set word size
-		mov	[compiled_struct_word_size],al
+		mov	eax,[@@word_size]		;set word size
+		mov	[compiled_struct_word_size],eax
 
 		mov	eax,[@@post_source_ptr]		;set source_ptr after byte/word/long
 		mov	[compiled_struct_source_ptr],eax
@@ -17106,8 +17241,11 @@ compile_struct_setup:
 		mov	eax,[@@initial_obj_ptr]		;set initial obj_ptr
 		mov	[compiled_struct_obj_ptr],eax
 
-		mov	al,[byte @@index_mode]		;set index mode
-		mov	[compiled_struct_index_mode],al
+		mov	eax,[@@index_mode]		;set index mode
+		mov	[compiled_struct_index_mode],eax
+
+		mov	eax,[@@bitfield]		;set bitfield
+		mov	[compiled_struct_bitfield],eax
 
 		pop	edi
 		pop	esi
@@ -17153,6 +17291,31 @@ compile_struct_setup:
 @@error_sehr:	jmp	error_sehr			;error, structure exceeds hub range
 
 
+@@getname:	call	get_symbol			;get name from source
+		jc	error_easmn			;if invalid, error
+		mov	[@@symbol_length],ecx		;else, set length
+		ret
+
+
+@@checkname:	lodsb					;get member name length
+
+		movzx	ecx,al				;copy member name
+		lea	edi,[symbol2]
+	rep	movsb
+
+		mov	ecx,[@@symbol_length]		;compare member name length
+		cmp	cl,al
+		jne	@@checkname2
+
+		push	esi				;compare member name
+		lea	esi,[symbol]
+		lea	edi,[symbol2]
+	repe	cmpsb
+		pop	esi
+
+@@checkname2:	ret					;z=1 if match
+
+
 @@exp:		push	[@@struct_type]			;save state before compiling expression
 		push	[@@flags]
 		push	[@@pop_source_ptr]
@@ -17178,6 +17341,7 @@ compile_struct_setup:
 		push	[@@index_size_1]
 		push	[@@index_size_2]
 		push	[@@index_size_3]
+		push	[@@bitfield]
 
 		push	eax
 		push	ebx
@@ -17195,7 +17359,8 @@ compile_struct_setup:
 		pop	ebx
 		pop	eax
 
-		pop	[@@index_size_3]		;restore state
+		pop	[@@bitfield]			;restore state
+		pop	[@@index_size_3]
 		pop	[@@index_size_2]
 		pop	[@@index_size_1]
 		pop	[@@index_size]
@@ -17248,14 +17413,40 @@ ddx		@@index_size
 ddx		@@index_size_1
 ddx		@@index_size_2
 ddx		@@index_size_3
+ddx		@@bitfield
 
-dbx		compiled_struct_flags
+ddx		compiled_struct_flags
 ddx		compiled_struct_size
 ddx		compiled_struct_address
-dbx		compiled_struct_word_size
+ddx		compiled_struct_word_size
 ddx		compiled_struct_source_ptr
 ddx		compiled_struct_obj_ptr
-dbx		compiled_struct_index_mode
+ddx		compiled_struct_index_mode
+ddx		compiled_struct_bitfield
+
+
+preserve_compiled_struct:				;call eax while preserving compiled_struct_* data
+
+		push	[compiled_struct_flags]
+		push	[compiled_struct_size]
+		push	[compiled_struct_address]
+		push	[compiled_struct_word_size]
+		push	[compiled_struct_source_ptr]
+		push	[compiled_struct_obj_ptr]
+		push	[compiled_struct_index_mode]
+		push	[compiled_struct_bitfield]
+
+		call	eax
+
+		pop	[compiled_struct_bitfield]
+		pop	[compiled_struct_index_mode]
+		pop	[compiled_struct_obj_ptr]
+		pop	[compiled_struct_source_ptr]
+		pop	[compiled_struct_word_size]
+		pop	[compiled_struct_address]
+		pop	[compiled_struct_size]
+		pop	[compiled_struct_flags]
+		ret
 ;
 ;
 ; Get offset of structure member - compile time only
@@ -17319,14 +17510,14 @@ get_offset_of_struct_member:
 
 		movzx	ecx,al				;compare member name length
 		cmp	ecx,[@@symbol_length]
-		jne	@@notmatch
+		jne	@@mismatch
 
 		push	esi				;compare member name
 		lea	esi,[symbol]
 		lea	edi,[symbol2]
 	repe	cmpsb
 		pop	esi
-		jne	@@notmatch
+		jne	@@mismatch
 
 		mov	eax,[@@member_offset]		;got match, update offset
 		add	[@@offset],eax
@@ -17334,16 +17525,27 @@ get_offset_of_struct_member:
 		mov	cl,[@@member_type]		;sub-struct? (3)
 		cmp	cl,3
 		jne	@@notstruct2			;if not struct, byte/word/long
-		mov	esi,edx				;struct, repoint to sub-struct
+		mov	esi,edx				;struct, enter sub-struct
 		jmp	@@structloop
 @@notstruct2:
+
 		mov	eax,1				;byte/word/long, set size to 1/2/4
 		shl	eax,cl
 		mov	[@@size],eax
 		call	@@handleindex			;handle byte/word/long index
 		jmp	@@done				;done
 
-@@notmatch:	lodsb					;not found, another member to check?
+
+@@mismatch:	cmp	[byte esi],2			;skip any bitfield members (only for byte/word/long)
+		jne	@@nextmember
+		inc	esi
+		lodsb
+		add	al,2
+		movzx	eax,al
+		add	esi,eax
+		jmp	@@mismatch
+
+@@nextmember:	lodsb					;not found, another member to check?
 		cmp	al,0
 		jne	@@checkmember
 		jmp	error_sdnctn
