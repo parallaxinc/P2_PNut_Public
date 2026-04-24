@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v54		*
+;*	       Spin2 Compiler v54a		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2026 by Parallax, Inc.	*
-;*	    Last Updated: 2026/04/22		*
+;*	    Last Updated: 2026/04/23		*
 ;*						*
 ;************************************************
 
@@ -2608,6 +2608,9 @@ error_sdcobu:	call	set_error
 
 error_sdcx:	call	set_error
 		db	'@"string"/STRING/LSTRING data cannot exceed 254 bytes',0
+
+error_sdnctbwl:	call	set_error
+		db	'Structure does not contain this BYTE/WORD/LONG/STRUCT name',0
 
 error_sdnctn:	call	set_error
 		db	'Structure does not contain this name',0
@@ -17467,7 +17470,7 @@ get_offset_of_struct_member:
 		push	esi
 		push	edi
 
-		call	get_element			;get type_con_struct (ebx = struct id)
+		call	get_element_obj			;get type_con_struct (ebx = struct id)
 		cmp	al,type_con_struct
 		jne	error_eaesn
 
@@ -17548,7 +17551,7 @@ get_offset_of_struct_member:
 @@nextmember:	lodsb					;not found, another member to check?
 		cmp	al,0
 		jne	@@checkmember
-		jmp	error_sdnctn
+		jmp	error_sdnctbwl
 
 
 @@done:		mov	ebx,[@@offset]			;return offset
