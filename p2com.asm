@@ -1,10 +1,10 @@
 ;************************************************
 ;*						*
-;*	       Spin2 Compiler v54a		*
+;*	       Spin2 Compiler v55		*
 ;*						*
 ;*	     Written by Chip Gracey		*
 ;*	 (C) 2006-2026 by Parallax, Inc.	*
-;*	    Last Updated: 2026/04/23		*
+;*	    Last Updated: 2026/05/07		*
 ;*						*
 ;************************************************
 
@@ -32,7 +32,7 @@
 ;
 ; Equates
 ;
-spin2_version		=	54
+spin2_version		=	55
 
 obj_size_limit		=	100000h		;must be same in delphi
 obj_data_limit		=	200000h		;must be same in delphi
@@ -969,7 +969,7 @@ count		bc_frac
 count		bc_string
 count		bc_bitrange
 
-counti		bc_con_n		,16
+counti		bc_con_n1_14		,16
 counti		bc_setup_reg_1D8_1F8	,16
 counti		bc_setup_var_0_15	,16
 counti		bc_setup_local_0_15	,16
@@ -977,7 +977,7 @@ counti		bc_read_local_0_15	,16
 counti		bc_write_local_0_15	,16
 
 
-countn		bc_set_incdec		,79h	;variable operator bytecodes
+countn		bc_set_incdec_rfvar	,15h	;variable operator bytecodes
 
 count		bc_repeat_var_init_n
 count		bc_repeat_var_init_1
@@ -986,6 +986,7 @@ count		bc_repeat_var_loop
 
 count		bc_get_field
 count		bc_get_addr
+
 count		bc_read
 count		bc_write
 count		bc_write_push
@@ -1091,8 +1092,17 @@ count		bc_scas_write_push
 count		bc_frac_write_push
 
 count		bc_setup_bfield_pop
+count		bc_read_bfield_pop
+count		bc_write_bfield_pop
+
 count		bc_setup_bfield_rfvar
-counti		bc_setup_bfield_0_31,32
+count		bc_read_bfield_rfvar
+count		bc_write_bfield_rfvar
+
+counti		bc_set_incdec_2_33	,32
+counti		bc_setup_bfield_0_31	,32
+counti		bc_read_bfield_0_31	,32
+counti		bc_write_bfield_0_31	,32
 
 
 count2n		bc_hubset		,54h	;hub bytecodes, miscellaneous routines (step by 2)
@@ -7306,15 +7316,15 @@ insert_interpreter:
 
 		cmp	[debug_mode],0		;if not debug mode, force NOP instructions
 		jne	@@debugmode
-		mov	[dword obj+@@debugnop+0],0
-		mov	[dword obj+@@debugnop+4],0
-		mov	[dword obj+@@debugnop+8],0
+		mov	[dword obj+@@_debugnop1_+0],0
+		mov	[dword obj+@@_debugnop1_+4],0
+		mov	[dword obj+@@_debugnop1_+8],0
 		jmp	@@notdebugmode
 @@debugmode:	movzx	eax,[debug_pin_rx]	;debug mode, install debug_pin_rx into instructions
-		or	[dword obj+@@debugnop+4],eax
+		or	[dword obj+@@_debugnop1_+4],eax
 		shl	eax,9
-		or	[dword obj+@@debugnop+0],eax
-		or	[dword obj+@@debugnop+8],eax
+		or	[dword obj+@@_debugnop1_+0],eax
+		or	[dword obj+@@_debugnop1_+8],eax
 @@notdebugmode:
 		ret
 
@@ -7325,7 +7335,7 @@ insert_interpreter:
 @@var_longs	=	3Ch
 @@clkmode_hub	=	40h
 @@clkfreq_hub	=	44h
-@@debugnop	=	0F34h
+@@_debugnop1_	=	0F78h			;must be updated whenever interpreter is modified!
 
 interpreter:	include	"Spin2_interpreter.inc"
 interpreter_end:
@@ -12107,10 +12117,10 @@ compile_instruction:
 		mov	ah,bc_byteswap
 		je	compile_struct_copy
 		cmp	al,type_til		;structure~ ?
-		mov	ah,bc_con_n+1		;(0)
+		mov	ah,bc_con_n1_14+1	;(0)
 		je	compile_struct_fill
 		cmp	al,type_tiltil		;structure~~ ?
-		mov	ah,bc_con_n+0		;(-1)
+		mov	ah,bc_con_n1_14+0	;(-1)
 		je	compile_struct_fill
 		jmp	error_eastott
 @@notstruct:
@@ -12140,11 +12150,11 @@ compile_instruction:
 		je	compile_var_assign
 
 		cmp	al,type_til		;var~ ?
-		mov	dl,bc_con_n+1
+		mov	dl,bc_con_n1_14+1
 		je	compile_var_clrset_inst
 
 		cmp	al,type_tiltil		;var~~ ?
-		mov	dl,bc_con_n
+		mov	dl,bc_con_n1_14+0
 		je	compile_var_clrset_inst
 
 		call	check_binary		;var binary op assign (w/push)?
@@ -12201,7 +12211,7 @@ compile_struct_fill:
 
 		call	compile_var_addr	;compile @struct
 
-		mov	al,ah			;enter bc_con_n for 0 or -1
+		mov	al,ah			;enter bc_con_n1_14 for 0 or -1
 		call	enter_obj
 
 		pop	ebx			;compile struct size
@@ -13805,11 +13815,11 @@ compile_term:	cmp	al,type_con_int		;constant integer?
 		je	compile_var_exp
 
 		cmp	al,type_til		;var~ ?
-		mov	dl,bc_con_n+1
+		mov	dl,bc_con_n1_14+1
 		je	compile_var_clrset_term
 
 		cmp	al,type_tiltil		;var~~ ?
-		mov	dl,bc_con_n
+		mov	dl,bc_con_n1_14+0
 		je	compile_var_clrset_term
 
 		cmp	al,type_assign		;var := x ?
@@ -14194,7 +14204,7 @@ ct_look:	mov	cl,bl			;save 'lookup'/'lookdown' and 0/1 flags
 
 		mov	al,cl			;compile initial index
 		and	al,1
-		add	al,bc_con_n+1		;(constant 0/1)
+		add	al,bc_con_n1_14+1	;(constant 0/1)
 		call	enter_obj
 
 @@loop:		mov	al,cl			;compile (next) value/range
@@ -16540,11 +16550,17 @@ compile_var:	push	eax
 		jz	@@done
 
 		dec	[obj_ptr]			;special inc/dec value, back up over pre/post-inc/dec assign
-		mov	al,bc_set_incdec		;compile inc/dec value modifier and special inc/dec value
+		cmp	ebx,33				;if > 33 then must do bytecode+rfvar, else single bytecode
+		ja	@@incdecrf
+		mov	al,bc_set_incdec_2_33-2		;compile single-bytecode inc/dec value modifier for 2..33
+		add	al,bl
+		call	enter_obj
+		jmp	@@incdecdone
+@@incdecrf:	mov	al,bc_set_incdec_rfvar		;compile multi-bytecode inc/dec value modifier with rfvar for 34+
 		call	enter_obj
 		mov	eax,ebx
 		call	compile_rfvar
-		mov	al,dh				;reenter pre/post-inc/dec assign
+@@incdecdone:	mov	al,dh				;reenter pre/post-inc/dec assign
 		jmp	@@enter
 @@notptrval:
 
@@ -16796,8 +16812,11 @@ compile_var:	push	eax
 		call	get_element			;skip structure bitfield name
 		mov	eax,[compiled_struct_bitfield]	;get structure bitfield value
 		and	eax,3FFh
-		call	@@compile_bitfield		;compile bitfield
-		jmp	@@nobit
+		call	@@compile_bitfield		;compile constant bitfield
+		cmp	dl,1				;if read/write, done
+		jbe	@@done
+		jmp	@@assign			;else, compile assign
+
 @@bfnotstruct2:
 		test	ecx,var_bitfield_con		;constant or variable bitfield?
 		jz	@@bfnotcon
@@ -16817,9 +16836,11 @@ compile_var:	push	eax
 		shl	eax,5
 		and	[con_value],1Fh
 		or	eax,[con_value]
-@@bfgotcon:	call	@@compile_bitfield
-		call	get_rightb			;get ']'
-		jmp	@@nobit
+@@bfgotcon:	call	get_rightb			;get ']'
+		call	@@compile_bitfield		;compile constant bitfield
+		cmp	dl,1				;if read/write, done
+		jbe	@@done
+		jmp	@@assign			;else, compile assign
 @@bfnotcon:
 		call	get_dot				;variable bitfield (already compiled), get '.'
 		call	get_leftb			;get '['
@@ -16827,9 +16848,20 @@ compile_var:	push	eax
 		call	check_dotdot
 		jne	@@bfnotdotdot
 		call	skip_exp
-@@bfnotdotdot:	mov	al,bc_setup_bfield_pop		;setup bitfield by runtime pop
-		call	enter_obj
-		call	get_rightb			;get ']'
+@@bfnotdotdot:	call	get_rightb			;get ']'
+		cmp	dl,0				;read?
+		jne	@@bfvarnr
+		mov	al,bc_read_bfield_pop
+		jmp	@@bfvar
+@@bfvarnr:	cmp	dl,1				;write?
+		jne	@@bfvarnw
+		mov	al,bc_write_bfield_pop
+		jmp	@@bfvar
+@@bfvarnw:	mov	al,bc_setup_bfield_pop		;setup
+@@bfvar:	call	enter_obj
+		cmp	dl,1				;if read/write, done
+		jbe	@@done
+		jmp	@@assign			;else, compile assign
 @@nobit:
 
 		mov	al,bc_read			;read?
@@ -16838,7 +16870,7 @@ compile_var:	push	eax
 		mov	al,bc_write			;write?
 		cmp	dl,1
 		je	@@enter
-		mov	al,dh				;assign
+@@assign:	mov	al,dh				;assign
 @@enter:	call	enter_obj
 
 @@done:		pop	[source_ptr]
@@ -16861,15 +16893,40 @@ compile_var:	push	eax
 		pop	eax
 		ret
 
+
 @@compile_bitfield:
-		cmp	eax,31				;compile bitfield
-		ja	@@multibit
-		add	al,bc_setup_bfield_0_31		;single-bit
-		jmp	enter_obj
-@@multibit:	push	eax				;multi-bit
-		mov	al,bc_setup_bfield_rfvar
-		call	enter_obj
-		pop	eax
+		cmp	eax,31				;compile constant bitfield
+		ja	@@multibitx			;multi-bit or single-bit?
+
+		cmp	dl,0				;single-bit read?
+		jne	@@singlebitnr
+		add	al,bc_read_bfield_0_31
+		jmp	@@singlebit
+@@singlebitnr:
+		cmp	dl,1				;single-bit write?
+		jne	@@singlebitnw
+		add	al,bc_write_bfield_0_31
+		jmp	@@singlebit
+@@singlebitnw:
+		add	al,bc_setup_bfield_0_31		;single-bit assign
+@@singlebit:	jmp	enter_obj
+
+@@multibitx:	push	eax				;multi-bit
+
+		cmp	dl,0				;multi-bit read?
+		jne	@@multibitnr
+		mov	al,bc_read_bfield_rfvar
+		jmp	@@multibit
+@@multibitnr:
+		cmp	dl,1				;multi-bit write?
+		jne	@@multibitnw
+		mov	al,bc_write_bfield_rfvar
+		jmp	@@multibit
+@@multibitnw:
+		mov	al,bc_setup_bfield_rfvar	;multi-bit assign
+@@multibit:	call	enter_obj
+
+		pop	eax				;compile rfvar for multi-bit bitfield
 		jmp	compile_rfvar
 ;
 ;
@@ -17606,7 +17663,7 @@ compile_constant:
 		inc	eax
 		cmp	eax,14+1
 		ja	@@notimm
-		add	al,bc_con_n
+		add	al,bc_con_n1_14
 		call	enter_obj
 		jmp	@@exit
 @@notimm:
